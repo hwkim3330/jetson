@@ -25,7 +25,7 @@ from launch_ros.actions import Node
 
 def generate_launch_description():
     use_sim_time = LaunchConfiguration('use_sim_time', default='false')
-    use_rviz = LaunchConfiguration('use_rviz', default='true')
+    use_rviz = LaunchConfiguration('use_rviz', default='false')  # Headless by default
     robot_slam_prefix = get_package_share_directory('robot_slam')
     cartographer_config_dir = LaunchConfiguration('robot_config_dir', default=os.path.join(
                                                   robot_slam_prefix, 'config'))

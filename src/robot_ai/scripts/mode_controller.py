@@ -90,6 +90,10 @@ class ModeController(Node):
             String, '/robot/ai_mode', self.ai_mode_callback, 10
         )
 
+        self.save_map_sub = self.create_subscription(
+            String, '/robot/save_map', self.save_map_callback, 10
+        )
+
         self.example_sub = self.create_subscription(
             String, '/robot/example', self.example_callback, 10
         )
@@ -210,6 +214,29 @@ class ModeController(Node):
                 'ros2', 'launch', 'robot_navigation', 'navigation2.launch.py'
             ])
             self.get_logger().info('Navigation started')
+
+    def save_map_callback(self, msg):
+        """Handle map save request"""
+        if msg.data.lower() == 'save':
+            self.get_logger().info('Saving map...')
+            import datetime
+            timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+            map_path = f'/home/nvidia/ros2_ws/maps/map_{timestamp}'
+
+            # Create maps directory if not exists
+            os.makedirs('/home/nvidia/ros2_ws/maps', exist_ok=True)
+
+            # Run map saver
+            try:
+                subprocess.run([
+                    'ros2', 'run', 'nav2_map_server', 'map_saver_cli',
+                    '-f', map_path, '--ros-args', '-p', 'save_map_timeout:=10.0'
+                ], timeout=15)
+                self.get_logger().info(f'Map saved to {map_path}')
+            except subprocess.TimeoutExpired:
+                self.get_logger().error('Map save timed out')
+            except Exception as e:
+                self.get_logger().error(f'Map save failed: {e}')
 
     def ai_mode_callback(self, msg):
         """Handle AI mode change requests"""
