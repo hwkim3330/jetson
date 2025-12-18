@@ -30,6 +30,7 @@ install(PROGRAMS
   scripts/auto_parking.py
   scripts/lane_detector.py
   scripts/lane_follower.py
+  scripts/auto_explore.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

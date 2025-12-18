@@ -215,6 +215,26 @@ class ModeController(Node):
             ])
             self.get_logger().info('Navigation started')
 
+        elif new_mode == 'explore':
+            # Start SLAM + Auto Explore (robot cleaner mode)
+            self.start_mode_process([
+                'ros2', 'launch', 'robot_slam', 'cartographer.launch.py'
+            ])
+            self.get_logger().info('SLAM started for auto explore')
+            # Start auto explore after SLAM initializes
+            self.create_timer(2.0, self.start_auto_explore, one_shot=True)
+
+    def start_auto_explore(self):
+        """Start auto explore script"""
+        try:
+            process = subprocess.Popen([
+                'ros2', 'run', 'robot_ai', 'auto_explore.py'
+            ], preexec_fn=os.setsid)
+            self.mode_processes.append(process)
+            self.get_logger().info('Auto explore started')
+        except Exception as e:
+            self.get_logger().error(f'Failed to start auto explore: {e}')
+
     def save_map_callback(self, msg):
         """Handle map save request"""
         if msg.data.lower() == 'save':

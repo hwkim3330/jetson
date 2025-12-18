@@ -35,7 +35,7 @@
         .camera-wrap canvas { pointer-events: none; }
 
         .map-wrap { flex: 1; background: #1c1c1e; position: relative; min-height: 200px; overflow: hidden; }
-        #mapCanvas { width: 100%; height: 100%; display: block; background: #2c2c2e; touch-action: none; }
+        #mapCanvas, #cleanCanvas { width: 100%; height: 100%; display: block; background: #2c2c2e; touch-action: none; }
         .map-btns { position: absolute; top: 8px; left: 8px; display: flex; flex-direction: column; gap: 4px; z-index: 10; }
         .map-btns-right { position: absolute; top: 8px; right: 8px; display: flex; flex-direction: column; gap: 4px; z-index: 10; }
         .mbtn { padding: 6px 12px; background: #fff; border: none; border-radius: 6px; font-size: 11px; font-weight: 600; color: #1c1c1e; box-shadow: 0 2px 6px rgba(0,0,0,0.3); cursor: pointer; }
@@ -71,6 +71,7 @@
         <nav class="tabs">
             <button class="tab active" data-page="control">Control</button>
             <button class="tab" data-page="map">Map</button>
+            <button class="tab" data-page="clean">Clean</button>
             <button class="tab" data-page="ai">AI</button>
         </nav>
         <div class="status"><span class="dot" id="dot"></span><span id="stxt">Offline</span></div>
@@ -116,6 +117,27 @@
             </div>
         </div>
 
+        <div class="page" id="page-clean">
+            <div class="map-wrap">
+                <canvas id="cleanCanvas"></canvas>
+                <div class="map-btns">
+                    <button class="mbtn green" id="bAutoSlam">Auto SLAM</button>
+                    <button class="mbtn red" id="bCleanStop">Stop</button>
+                </div>
+                <div class="mstat" id="cleanStat">Ready</div>
+                <div class="map-info" id="cleanInfo">Coverage: 0%</div>
+            </div>
+            <div class="ctrl-row">
+                <div class="lidar-box"><canvas id="lid4"></canvas></div>
+                <div class="joy-box"><div class="joy-zone" id="jz4"></div></div>
+            </div>
+            <div class="bottom-bar">
+                <div class="odom-item"><span class="olbl">X</span><span class="oval" id="x4">0.00</span></div>
+                <div class="odom-item"><span class="olbl">Y</span><span class="oval" id="y4">0.00</span></div>
+                <div class="odom-item"><span class="olbl">θ</span><span class="oval" id="t4">0°</span></div>
+            </div>
+        </div>
+
         <div class="page" id="page-ai">
             <div class="camera-wrap">
                 <img id="cam2" src="" alt="">
@@ -142,10 +164,12 @@ document.addEventListener('touchmove', e => e.preventDefault(), { passive: false
 let ros, cmdVel, aiPub, modePub, goalPub, initPosePub, savePub, conn = false;
 let pts = [], yolo = false, boxes = [];
 const ML = 0.3, MA = 1.5, CAM_W = 640, CAM_H = 360;
-const lids = ['lid1','lid2','lid3'].map(id => document.getElementById(id));
+const lids = ['lid1','lid2','lid3','lid4'].map(id => document.getElementById(id));
 const boxCanvas = document.getElementById('boxCanvas');
 const mapCanvas = document.getElementById('mapCanvas');
 const mapCtx = mapCanvas ? mapCanvas.getContext('2d') : null;
+const cleanCanvas = document.getElementById('cleanCanvas');
+const cleanCtx = cleanCanvas ? cleanCanvas.getContext('2d') : null;
 
 // Map state
 let mapData = null, mapInfo = null;
@@ -175,6 +199,11 @@ function initMapCanvas() {
     if(wrap && mapCanvas) {
         mapCanvas.width = wrap.clientWidth;
         mapCanvas.height = wrap.clientHeight;
+    }
+    const wrap2 = cleanCanvas?.parentElement;
+    if(wrap2 && cleanCanvas) {
+        cleanCanvas.width = wrap2.clientWidth;
+        cleanCanvas.height = wrap2.clientHeight;
     }
 }
 window.onresize = () => { initLids(); initBoxCanvas(); initMapCanvas(); };
@@ -303,6 +332,24 @@ mapCanvas?.addEventListener('click', function(e) {
     mapMode = 'none';
     document.getElementById('bGoal').classList.remove('on');
 });
+
+// Auto SLAM (Clean tab)
+let autoSlam = false;
+document.getElementById('bAutoSlam').onclick = function() {
+    autoSlam = !autoSlam;
+    this.classList.toggle('on', autoSlam);
+    this.textContent = autoSlam ? 'Exploring...' : 'Auto SLAM';
+    document.getElementById('cleanStat').textContent = autoSlam ? 'Auto exploring...' : 'Ready';
+    if(modePub) modePub.publish(new ROSLIB.Message({data: autoSlam ? 'explore' : 'manual'}));
+};
+document.getElementById('bCleanStop').onclick = function() {
+    autoSlam = false;
+    document.getElementById('bAutoSlam').classList.remove('on');
+    document.getElementById('bAutoSlam').textContent = 'Auto SLAM';
+    document.getElementById('cleanStat').textContent = 'Stopped';
+    if(modePub) modePub.publish(new ROSLIB.Message({data: 'manual'}));
+    stop();
+};
 
 function publishInitPose(pose) {
     if(!initPosePub) return;
@@ -571,7 +618,7 @@ function onOdom(m) {
 
     robotPose = {x: x, y: y, theta: t};
 
-    ['1','2','3'].forEach(i => {
+    ['1','2','3','4'].forEach(i => {
         const ex = document.getElementById('x'+i), ey = document.getElementById('y'+i), et = document.getElementById('t'+i);
         if(ex) ex.textContent = x.toFixed(2);
         if(ey) ey.textContent = y.toFixed(2);
@@ -630,7 +677,7 @@ function mkJoy(id) {
 
 function initJoys() {
     Object.values(joys).forEach(j => j?.destroy());
-    joys = { j1: mkJoy('jz1'), j2: mkJoy('jz2'), j3: mkJoy('jz3') };
+    joys = { j1: mkJoy('jz1'), j2: mkJoy('jz2'), j3: mkJoy('jz3'), j4: mkJoy('jz4') };
 }
 
 // Velocity
@@ -667,7 +714,66 @@ document.onkeyup = e => {
 };
 
 // Map redraw at lower frequency
-setInterval(drawMap, 500);
+// Draw both map canvases
+function drawAll() {
+    drawMap();
+    drawCleanMap();
+}
+
+// Draw clean tab map (simplified - just map + robot)
+function drawCleanMap() {
+    if(!cleanCtx || !cleanCanvas || !cleanCanvas.width) return;
+    const cw = cleanCanvas.width, ch = cleanCanvas.height;
+    const cx = cw / 2, cy = ch / 2;
+
+    cleanCtx.fillStyle = '#2c2c2e';
+    cleanCtx.fillRect(0, 0, cw, ch);
+
+    function w2c(wx, wy) {
+        return { x: cx + (wx - robotPose.x) * PPM, y: cy - (wy - robotPose.y) * PPM };
+    }
+
+    if(mapImage && mapInfo) {
+        const res = mapInfo.resolution;
+        const ox = mapInfo.origin.position.x;
+        const oy = mapInfo.origin.position.y;
+        const mw = mapInfo.width;
+        const mh = mapInfo.height;
+        const scale = res * PPM;
+        const mapOrigin = w2c(ox, oy + mh * res);
+        cleanCtx.save();
+        cleanCtx.translate(mapOrigin.x, mapOrigin.y);
+        cleanCtx.scale(scale, scale);
+        cleanCtx.drawImage(mapImage, 0, 0);
+        cleanCtx.restore();
+
+        // Calculate coverage (free cells / total non-unknown cells)
+        if(mapData) {
+            let free = 0, known = 0;
+            for(let v of mapData) { if(v !== -1) { known++; if(v === 0) free++; } }
+            const coverage = known > 0 ? Math.round(100 * free / known) : 0;
+            document.getElementById('cleanInfo').textContent = `Coverage: ${coverage}%`;
+        }
+    }
+
+    // Robot
+    cleanCtx.save();
+    cleanCtx.translate(cx, cy);
+    cleanCtx.rotate(-robotPose.theta + Math.PI);
+    cleanCtx.fillStyle = '#34c759';
+    cleanCtx.beginPath();
+    cleanCtx.moveTo(12, 0);
+    cleanCtx.lineTo(-6, -8);
+    cleanCtx.lineTo(-6, 8);
+    cleanCtx.closePath();
+    cleanCtx.fill();
+    cleanCtx.strokeStyle = '#fff';
+    cleanCtx.lineWidth = 2;
+    cleanCtx.stroke();
+    cleanCtx.restore();
+}
+
+setInterval(drawAll, 500);
 
 setCam();
 connect();
