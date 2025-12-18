@@ -100,7 +100,6 @@
                     <button class="mbtn red" id="bStop">Stop</button>
                 </div>
                 <div class="map-btns-right">
-                    <button class="mbtn orange" id="bPose">Pose</button>
                     <button class="mbtn" id="bGoal">Goal</button>
                 </div>
                 <div class="mstat" id="mstat">Ready</div>
@@ -217,16 +216,32 @@ document.getElementById('bSlam').onclick = function() {
     document.getElementById('mstat').textContent = slam ? 'SLAM Active' : 'Ready';
     if(modePub) modePub.publish(new ROSLIB.Message({data: slam ? 'slam' : 'manual'}));
     mapMode = 'none';
-    updateModeButtons();
+    document.getElementById('bGoal').classList.remove('on');
 };
 document.getElementById('bNav').onclick = function() {
     if(slam) { slam = false; document.getElementById('bSlam').classList.remove('on'); }
     nav = !nav;
     this.classList.toggle('on', nav);
-    document.getElementById('mstat').textContent = nav ? 'Nav Active' : 'Ready';
+    document.getElementById('mstat').textContent = nav ? 'Nav Active - Tap goal' : 'Ready';
     if(modePub) modePub.publish(new ROSLIB.Message({data: nav ? 'nav' : 'manual'}));
+
+    // Auto-publish initial pose when Nav starts
+    if(nav && initPosePub) {
+        setTimeout(() => {
+            const q = {x:0, y:0, z:Math.sin(robotPose.theta/2), w:Math.cos(robotPose.theta/2)};
+            initPosePub.publish(new ROSLIB.Message({
+                header: {stamp: {sec:0, nanosec:0}, frame_id: 'map'},
+                pose: {
+                    pose: { position: {x: robotPose.x, y: robotPose.y, z: 0}, orientation: q },
+                    covariance: [0.25,0,0,0,0,0, 0,0.25,0,0,0,0, 0,0,0,0,0,0, 0,0,0,0,0,0, 0,0,0,0,0,0, 0,0,0,0,0,0.07]
+                }
+            }));
+            initPose = {x: robotPose.x, y: robotPose.y, theta: robotPose.theta};
+        }, 1000); // Wait for Nav2 to initialize
+    }
+
     mapMode = 'none';
-    updateModeButtons();
+    document.getElementById('bGoal').classList.remove('on');
 };
 document.getElementById('bSave').onclick = function() {
     if(savePub) {
@@ -241,35 +256,30 @@ document.getElementById('bStop').onclick = () => {
     slam = false; nav = false;
     document.getElementById('bSlam').classList.remove('on');
     document.getElementById('bNav').classList.remove('on');
+    document.getElementById('bGoal').classList.remove('on');
     document.getElementById('mstat').textContent = 'Ready';
     if(modePub) modePub.publish(new ROSLIB.Message({data: 'manual'}));
     goalPose = null; initPose = null;
     globalPath = []; localPath = [];
     mapMode = 'none';
-    updateModeButtons();
     stop();
 };
 
-// Pose/Goal mode buttons
-document.getElementById('bPose').onclick = function() {
-    mapMode = mapMode === 'pose' ? 'none' : 'pose';
-    updateModeButtons();
-    document.getElementById('mstat').textContent = mapMode === 'pose' ? 'Tap to set pose' : (nav ? 'Nav Active' : 'Ready');
-};
+// Goal mode button
 document.getElementById('bGoal').onclick = function() {
+    if(!nav) {
+        document.getElementById('mstat').textContent = 'Start Nav first!';
+        return;
+    }
     mapMode = mapMode === 'goal' ? 'none' : 'goal';
-    updateModeButtons();
-    document.getElementById('mstat').textContent = mapMode === 'goal' ? 'Tap to set goal' : (nav ? 'Nav Active' : 'Ready');
+    this.classList.toggle('on', mapMode === 'goal');
+    document.getElementById('mstat').textContent = mapMode === 'goal' ? 'Tap map to set goal' : 'Nav Active';
 };
 
-function updateModeButtons() {
-    document.getElementById('bPose').classList.toggle('on', mapMode === 'pose');
-    document.getElementById('bGoal').classList.toggle('on', mapMode === 'goal');
-}
-
-// Map touch handling (simplified - single tap)
+// Map touch handling - tap to set goal
 mapCanvas?.addEventListener('click', function(e) {
-    if(mapMode === 'none') return;
+    if(mapMode !== 'goal') return;
+
     const rect = mapCanvas.getBoundingClientRect();
     const cx = e.clientX - rect.left;
     const cy = e.clientY - rect.top;
@@ -282,21 +292,15 @@ mapCanvas?.addEventListener('click', function(e) {
     const wx = robotPose.x + (cx - centerX) / PPM;
     const wy = robotPose.y - (cy - centerY) / PPM;
 
-    // Direction toward robot (facing backward to where we came from)
-    const theta = Math.atan2(robotPose.y - wy, robotPose.x - wx);
+    // Direction: from robot toward goal
+    const theta = Math.atan2(wy - robotPose.y, wx - robotPose.x);
 
-    if(mapMode === 'pose') {
-        initPose = {x: wx, y: wy, theta: theta};
-        publishInitPose(initPose);
-        document.getElementById('mstat').textContent = `Pose: ${wx.toFixed(1)}, ${wy.toFixed(1)}`;
-    } else if(mapMode === 'goal') {
-        goalPose = {x: wx, y: wy, theta: theta};
-        publishGoal(goalPose);
-        document.getElementById('mstat').textContent = `Goal: ${wx.toFixed(1)}, ${wy.toFixed(1)}`;
-    }
+    goalPose = {x: wx, y: wy, theta: theta};
+    publishGoal(goalPose);
+    document.getElementById('mstat').textContent = `Navigating to (${wx.toFixed(1)}, ${wy.toFixed(1)})`;
 
     mapMode = 'none';
-    updateModeButtons();
+    document.getElementById('bGoal').classList.remove('on');
 });
 
 function publishInitPose(pose) {
