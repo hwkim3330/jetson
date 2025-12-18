@@ -508,10 +508,10 @@ function drawMap() {
         mapCtx.fill();
     }
 
-    // Draw robot (blue triangle at center)
+    // Draw robot (blue triangle at center, arrow points forward)
     mapCtx.save();
     mapCtx.translate(cx, cy);
-    mapCtx.rotate(-robotPose.theta);
+    mapCtx.rotate(-robotPose.theta + Math.PI);
     mapCtx.fillStyle = '#007aff';
     mapCtx.beginPath();
     mapCtx.moveTo(12, 0);
