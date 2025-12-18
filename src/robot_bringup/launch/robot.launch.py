@@ -144,7 +144,7 @@ def generate_launch_description():
             name='camera_node',
             parameters=[{
                 'width': 640,
-                'height': 360,  # 16:9 for mobile
+                'height': 480,  # 4:3 native IMX219
                 'fps': 15,
                 'quality': 60,
                 'flip_method': 2,
