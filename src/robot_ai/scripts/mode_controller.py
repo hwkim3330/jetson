@@ -219,12 +219,11 @@ class ModeController(Node):
         """Handle map save request"""
         if msg.data.lower() == 'save':
             self.get_logger().info('Saving map...')
-            import datetime
-            timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-            map_path = f'/home/nvidia/ros2_ws/maps/map_{timestamp}'
+            map_dir = '/home/nvidia/ros2_ws/maps'
+            map_path = f'{map_dir}/map'  # Always save as map.yaml for Nav2
 
             # Create maps directory if not exists
-            os.makedirs('/home/nvidia/ros2_ws/maps', exist_ok=True)
+            os.makedirs(map_dir, exist_ok=True)
 
             # Run map saver
             try:
@@ -232,7 +231,7 @@ class ModeController(Node):
                     'ros2', 'run', 'nav2_map_server', 'map_saver_cli',
                     '-f', map_path, '--ros-args', '-p', 'save_map_timeout:=10.0'
                 ], timeout=15)
-                self.get_logger().info(f'Map saved to {map_path}')
+                self.get_logger().info(f'Map saved to {map_path}.yaml')
             except subprocess.TimeoutExpired:
                 self.get_logger().error('Map save timed out')
             except Exception as e:

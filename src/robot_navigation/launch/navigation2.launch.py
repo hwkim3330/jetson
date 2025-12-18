@@ -26,12 +26,19 @@ ROS_DISTRO = os.environ.get('ROS_DISTRO')
 
 def generate_launch_description():
     use_sim_time = LaunchConfiguration('use_sim_time', default='false')
-    map_dir = LaunchConfiguration(
-        'map',
-        default=os.path.join(
-            get_package_share_directory('robot_navigation'),
-            'map',
-            'map.yaml'))
+
+    # Look for map in workspace maps/ folder first, then package folder
+    workspace_map = '/home/nvidia/ros2_ws/maps/map.yaml'
+    package_map = os.path.join(get_package_share_directory('robot_navigation'), 'map', 'map.yaml')
+
+    if os.path.exists(workspace_map):
+        default_map = workspace_map
+    elif os.path.exists(package_map):
+        default_map = package_map
+    else:
+        default_map = workspace_map  # Will error if not found
+
+    map_dir = LaunchConfiguration('map', default=default_map)
 
     param_file_name = KETI_MODEL + '.yaml'
     if ROS_DISTRO == 'humble':
