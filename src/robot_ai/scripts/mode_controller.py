@@ -19,6 +19,8 @@ Manages different operation modes:
 - follower: Follow detected person
 - lane: Lane following
 - parking: Auto parking
+- slam: SLAM mapping with cartographer
+- nav: Navigation with Nav2
 
 AI Detection modes:
 - yolo: YOLO object detection
@@ -195,8 +197,19 @@ class ModeController(Node):
             # Send start command
             self.create_timer(1.0, self.start_parking, one_shot=True)
 
+        elif new_mode == 'slam':
+            # Start SLAM (cartographer)
+            self.start_mode_process([
+                'ros2', 'launch', 'robot_slam', 'cartographer.launch.py'
+            ])
+            self.get_logger().info('SLAM started - drive around to map')
+
         elif new_mode == 'nav':
-            self.get_logger().info('Navigation mode - use Map tab for goal setting')
+            # Start Navigation
+            self.start_mode_process([
+                'ros2', 'launch', 'robot_navigation', 'navigation2.launch.py'
+            ])
+            self.get_logger().info('Navigation started')
 
     def ai_mode_callback(self, msg):
         """Handle AI mode change requests"""

@@ -52,16 +52,10 @@
         .joy-box { flex: 1; background: #f2f2f7; position: relative; }
         .joy-zone { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 160px; height: 160px; background: radial-gradient(circle, #fff 0%, #e5e5ea 100%); border-radius: 50%; box-shadow: inset 0 2px 4px rgba(0,0,0,0.1); }
 
-        .bottom-bar { display: flex; align-items: center; padding: 6px 12px; background: #fff; border-top: 1px solid #e5e5ea; flex-shrink: 0; gap: 12px; }
-        .odom-group { display: flex; gap: 8px; }
-        .odom-item { display: flex; align-items: center; gap: 2px; }
-        .olbl { font-size: 10px; color: #8e8e93; font-weight: 600; }
-        .oval { font-size: 13px; font-weight: 700; color: #1c1c1e; min-width: 45px; }
-        .speed-group { flex: 1; display: flex; align-items: center; gap: 8px; }
-        .speed-group label { font-size: 10px; font-weight: 600; color: #8e8e93; }
-        .speed-group input { flex: 1; height: 4px; -webkit-appearance: none; background: #e5e5ea; border-radius: 2px; }
-        .speed-group input::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px; background: #007aff; border-radius: 50%; }
-        .speed-group span { font-size: 12px; font-weight: 700; color: #007aff; min-width: 36px; text-align: right; }
+        .bottom-bar { display: flex; align-items: center; justify-content: center; padding: 8px 12px; background: #fff; border-top: 1px solid #e5e5ea; flex-shrink: 0; gap: 16px; }
+        .odom-item { display: flex; align-items: center; gap: 4px; }
+        .olbl { font-size: 11px; color: #8e8e93; font-weight: 600; }
+        .oval { font-size: 14px; font-weight: 700; color: #1c1c1e; min-width: 50px; }
 
         .ai-btn { position: absolute; top: 8px; right: 8px; padding: 8px 16px; background: rgba(255,255,255,0.9); border: none; border-radius: 8px; font-size: 12px; font-weight: 600; z-index: 5; cursor: pointer; }
         .ai-btn:active { transform: scale(0.95); }
@@ -89,27 +83,17 @@
                 <div class="joy-box"><div class="joy-zone" id="jz1"></div></div>
             </div>
             <div class="bottom-bar">
-                <div class="odom-group">
-                    <div class="odom-item"><span class="olbl">X</span><span class="oval" id="x1">0.00</span></div>
-                    <div class="odom-item"><span class="olbl">Y</span><span class="oval" id="y1">0.00</span></div>
-                    <div class="odom-item"><span class="olbl">θ</span><span class="oval" id="t1">0°</span></div>
-                </div>
-                <div class="speed-group">
-                    <label>Speed</label>
-                    <input type="range" id="spd" min="10" max="150" value="50">
-                    <span id="spdv">50%</span>
-                </div>
+                <div class="odom-item"><span class="olbl">X</span><span class="oval" id="x1">0.00</span></div>
+                <div class="odom-item"><span class="olbl">Y</span><span class="oval" id="y1">0.00</span></div>
+                <div class="odom-item"><span class="olbl">θ</span><span class="oval" id="t1">0°</span></div>
             </div>
         </div>
 
         <div class="page" id="page-map">
             <div class="map-wrap">
-                <div id="mapDiv"><span class="no-map">Start SLAM to see map</span></div>
+                <div id="mapDiv"><span class="no-map">Press SLAM to start mapping</span></div>
                 <div class="map-btns">
                     <button class="mbtn" id="bSlam">SLAM</button>
-                    <button class="mbtn" id="bSave">Save</button>
-                    <button class="mbtn" id="bLoad">Load</button>
-                    <button class="mbtn" id="bNav">Nav</button>
                     <button class="mbtn red" id="bStop">Stop</button>
                 </div>
                 <div class="mstat" id="mstat">Ready</div>
@@ -119,16 +103,9 @@
                 <div class="joy-box"><div class="joy-zone" id="jz2"></div></div>
             </div>
             <div class="bottom-bar">
-                <div class="odom-group">
-                    <div class="odom-item"><span class="olbl">X</span><span class="oval" id="x2">0.00</span></div>
-                    <div class="odom-item"><span class="olbl">Y</span><span class="oval" id="y2">0.00</span></div>
-                    <div class="odom-item"><span class="olbl">θ</span><span class="oval" id="t2">0°</span></div>
-                </div>
-                <div class="speed-group">
-                    <label>Speed</label>
-                    <input type="range" id="spd2" min="10" max="150" value="50">
-                    <span id="spdv2">50%</span>
-                </div>
+                <div class="odom-item"><span class="olbl">X</span><span class="oval" id="x2">0.00</span></div>
+                <div class="odom-item"><span class="olbl">Y</span><span class="oval" id="y2">0.00</span></div>
+                <div class="odom-item"><span class="olbl">θ</span><span class="oval" id="t2">0°</span></div>
             </div>
         </div>
 
@@ -144,16 +121,9 @@
             </div>
             <div class="log-bar" id="logB">AI Detection Log</div>
             <div class="bottom-bar">
-                <div class="odom-group">
-                    <div class="odom-item"><span class="olbl">X</span><span class="oval" id="x3">0.00</span></div>
-                    <div class="odom-item"><span class="olbl">Y</span><span class="oval" id="y3">0.00</span></div>
-                    <div class="odom-item"><span class="olbl">θ</span><span class="oval" id="t3">0°</span></div>
-                </div>
-                <div class="speed-group">
-                    <label>Speed</label>
-                    <input type="range" id="spd3" min="10" max="150" value="50">
-                    <span id="spdv3">50%</span>
-                </div>
+                <div class="odom-item"><span class="olbl">X</span><span class="oval" id="x3">0.00</span></div>
+                <div class="odom-item"><span class="olbl">Y</span><span class="oval" id="y3">0.00</span></div>
+                <div class="odom-item"><span class="olbl">θ</span><span class="oval" id="t3">0°</span></div>
             </div>
         </div>
     </div>
@@ -162,8 +132,8 @@
 <script>
 document.addEventListener('touchmove', e => e.preventDefault(), { passive: false });
 
-let ros, cmdVel, aiPub, modePub, conn = false, spd = 0.5, pts = [], yolo = false, boxes = [];
-const ML = 0.5, MA = 2.0, CAM_W = 640, CAM_H = 360;
+let ros, cmdVel, aiPub, modePub, conn = false, pts = [], yolo = false, boxes = [];
+const ML = 0.3, MA = 1.5, CAM_W = 640, CAM_H = 360;
 const lids = ['lid1','lid2','lid3'].map(id => document.getElementById(id));
 const boxCanvas = document.getElementById('boxCanvas');
 let mapViewer = null, gridClient = null;
@@ -196,16 +166,6 @@ document.querySelectorAll('.tab').forEach(t => {
     };
 });
 
-// Speed
-['spd','spd2','spd3'].forEach(id => {
-    const el = document.getElementById(id);
-    if(el) el.oninput = e => {
-        spd = e.target.value/100;
-        ['spd','spd2','spd3'].forEach(sid => { const s=document.getElementById(sid); if(s) s.value=e.target.value; });
-        ['spdv','spdv2','spdv3'].forEach(vid => { const v=document.getElementById(vid); if(v) v.textContent=e.target.value+'%'; });
-    };
-});
-
 // YOLO
 document.getElementById('yoloB').onclick = function() {
     yolo = !yolo;
@@ -217,41 +177,20 @@ document.getElementById('yoloB').onclick = function() {
 };
 
 // Map buttons
-let slam=false, nav=false;
+let slam = false;
 document.getElementById('bSlam').onclick = function() {
-    slam = !slam; nav = false;
+    slam = !slam;
     this.classList.toggle('on', slam);
-    document.getElementById('bNav').classList.remove('on');
-    document.getElementById('mstat').textContent = slam ? 'SLAM Active' : 'Ready';
+    document.getElementById('mstat').textContent = slam ? 'SLAM Active - Drive to map' : 'Ready';
     if(modePub) modePub.publish(new ROSLIB.Message({data: slam ? 'slam' : 'manual'}));
-    if(slam) setTimeout(initMap, 500);
-};
-document.getElementById('bNav').onclick = function() {
-    nav = !nav; slam = false;
-    this.classList.toggle('on', nav);
-    document.getElementById('bSlam').classList.remove('on');
-    document.getElementById('mstat').textContent = nav ? 'Nav Active' : 'Ready';
-    if(modePub) modePub.publish(new ROSLIB.Message({data: nav ? 'nav' : 'manual'}));
+    if(slam) setTimeout(initMap, 1000);
 };
 document.getElementById('bStop').onclick = () => {
-    slam = nav = false;
+    slam = false;
     document.getElementById('bSlam').classList.remove('on');
-    document.getElementById('bNav').classList.remove('on');
     document.getElementById('mstat').textContent = 'Ready';
     if(modePub) modePub.publish(new ROSLIB.Message({data: 'manual'}));
     stop();
-};
-document.getElementById('bSave').onclick = () => {
-    if(confirm('Save current map?')) {
-        // TODO: call map_saver service
-        alert('Map save requested');
-    }
-};
-document.getElementById('bLoad').onclick = () => {
-    if(confirm('Load saved map?')) {
-        // TODO: call map_server
-        alert('Map load requested');
-    }
 };
 
 // ROS
@@ -286,33 +225,16 @@ function initMap() {
     if(!ros || !conn) return;
     const d = document.getElementById('mapDiv');
     if(!d || !d.offsetWidth || d.offsetWidth < 50) return;
-
-    // Clear previous
     d.innerHTML = '';
-
     try {
-        mapViewer = new ROS2D.Viewer({
-            divID: 'mapDiv',
-            width: d.offsetWidth,
-            height: d.offsetHeight
-        });
-
-        gridClient = new ROS2D.OccupancyGridClient({
-            ros: ros,
-            rootObject: mapViewer.scene,
-            continuous: true
-        });
-
+        mapViewer = new ROS2D.Viewer({ divID: 'mapDiv', width: d.offsetWidth, height: d.offsetHeight });
+        gridClient = new ROS2D.OccupancyGridClient({ ros: ros, rootObject: mapViewer.scene, continuous: true });
         gridClient.on('change', function() {
             if(gridClient.currentGrid) {
-                mapViewer.scaleToDimensions(
-                    gridClient.currentGrid.width * 0.05,
-                    gridClient.currentGrid.height * 0.05
-                );
+                mapViewer.scaleToDimensions(gridClient.currentGrid.width * 0.05, gridClient.currentGrid.height * 0.05);
             }
         });
     } catch(e) {
-        console.log('Map init error:', e);
         d.innerHTML = '<span class="no-map">Map viewer error</span>';
     }
 }
@@ -363,7 +285,7 @@ function onOdom(m) {
     });
 }
 
-// Detections with bounding boxes
+// Detections
 function onDet(m) {
     if(!yolo) return;
     try {
@@ -381,24 +303,17 @@ function drawBoxes() {
     const ctx = boxCanvas.getContext('2d');
     const cw = boxCanvas.width, ch = boxCanvas.height;
     ctx.clearRect(0, 0, cw, ch);
-
     if(!yolo || !boxes.length) return;
-
     const scaleX = cw / CAM_W, scaleY = ch / CAM_H;
-
     boxes.forEach(b => {
         if(!b.bbox || b.bbox.length < 4) return;
         const [x1, y1, x2, y2] = b.bbox;
         const sx = x1 * scaleX, sy = y1 * scaleY;
         const sw = (x2 - x1) * scaleX, sh = (y2 - y1) * scaleY;
-
-        // Box color by class
         const color = b.class === 'person' ? '#00ff00' : '#ff9500';
         ctx.strokeStyle = color;
         ctx.lineWidth = 2;
         ctx.strokeRect(sx, sy, sw, sh);
-
-        // Label
         const label = `${b.class} ${(b.confidence*100).toFixed(0)}%`;
         ctx.font = '12px sans-serif';
         const tw = ctx.measureText(label).width;
@@ -422,7 +337,7 @@ function mkJoy(id) {
         size: 120
     }).on('move', (e, d) => {
         const f = Math.min(d.force, 2) / 2, a = d.angle.radian;
-        send(Math.sin(a) * f * ML * spd * 2, -Math.cos(a) * f * MA * spd * 2);
+        send(Math.sin(a) * f * ML, -Math.cos(a) * f * MA);
     }).on('end', stop);
 }
 
@@ -431,45 +346,37 @@ function initJoys() {
     joys = { j1: mkJoy('jz1'), j2: mkJoy('jz2'), j3: mkJoy('jz3') };
 }
 
-// Velocity
+// Velocity (fixed speed, no slider)
 let tL=0, tA=0, cL=0, cA=0, lp=null, keys={};
-function send(l, a) { tL = l; tA = a; if(!lp) lp = setInterval(pub, 20); }
+function send(l, a) { tL = l; tA = a; if(!lp) lp = setInterval(pub, 50); }
 function pub() {
     if(!cmdVel || !conn) return;
-    cL += (tL - cL) * 0.15;
-    cA += (tA - cA) * 0.15;
-    if(Math.abs(cL) < 0.005) cL = 0;
-    if(Math.abs(cA) < 0.005) cA = 0;
+    cL += (tL - cL) * 0.3;
+    cA += (tA - cA) * 0.3;
+    if(Math.abs(cL) < 0.01) cL = 0;
+    if(Math.abs(cA) < 0.01) cA = 0;
     cmdVel.publish(new ROSLIB.Message({linear:{x:cL,y:0,z:0}, angular:{x:0,y:0,z:cA}}));
     if(!tL && !tA && !cL && !cA) { clearInterval(lp); lp = null; }
 }
 function stop() { tL = tA = 0; }
 
-// Keyboard - WASD (uppercase + lowercase)
+// Keyboard WASD
 function updateFromKeys() {
-    const s = spd * 2;
     let l = 0, a = 0;
-    if(keys['w'] || keys['W']) l = ML * s;
-    if(keys['s'] || keys['S']) l = -ML * s;
-    if(keys['a'] || keys['A']) a = MA * s;
-    if(keys['d'] || keys['D']) a = -MA * s;
+    if(keys['w'] || keys['W']) l = ML;
+    if(keys['s'] || keys['S']) l = -ML;
+    if(keys['a'] || keys['A']) a = MA;
+    if(keys['d'] || keys['D']) a = -MA;
     if(l || a) send(l, a);
     else stop();
 }
 
 document.onkeydown = e => {
     if(e.key === ' ') { stop(); return; }
-    if('wasdWASD'.includes(e.key)) {
-        keys[e.key] = true;
-        updateFromKeys();
-    }
+    if('wasdWASD'.includes(e.key)) { keys[e.key] = true; updateFromKeys(); }
 };
-
 document.onkeyup = e => {
-    if('wasdWASD'.includes(e.key)) {
-        keys[e.key] = false;
-        updateFromKeys();
-    }
+    if('wasdWASD'.includes(e.key)) { keys[e.key] = false; updateFromKeys(); }
 };
 
 setCam();
