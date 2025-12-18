@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="ko" translate="no">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="google" content="notranslate">
+    <title>SDV AI Robot</title>
+    <link rel="icon" href="keti.png">
+    <script src="js/eventemitter2.min.js"></script>
+    <script src="js/easeljs.min.js"></script>
+    <script src="js/roslib.min.js"></script>
+    <script src="js/ros2d.min.js"></script>
+    <script src="js/nipplejs.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; user-select: none; }
+        html, body { overflow: hidden; position: fixed; width: 100%; height: 100%; font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #f5f5f7; }
+        .app { height: 100%; display: flex; flex-direction: column; }
+
+        .header { display: flex; justify-content: space-between; align-items: center; padding: 8px 16px; background: rgba(255,255,255,0.9); backdrop-filter: blur(20px); border-bottom: 1px solid rgba(0,0,0,0.1); }
+        .logo { display: flex; align-items: center; gap: 8px; }
+        .logo-icon { height: 20px; width: auto; }
+        .logo h1 { font-size: 16px; font-weight: 600; color: #1d1d1f; }
+        .status { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #86868b; }
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #ff3b30; }
+        .status-dot.ok { background: #34c759; }
+
+        .tabs { display: flex; justify-content: center; padding: 6px 12px; background: #f5f5f7; }
+        .tabs-inner { display: flex; gap: 2px; padding: 3px; background: rgba(0,0,0,0.06); border-radius: 8px; }
+        .tab { padding: 6px 16px; background: transparent; border: none; font-size: 12px; font-weight: 500; color: #1d1d1f; cursor: pointer; border-radius: 6px; }
+        .tab.active { background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+
+        .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+        .page { display: none; flex: 1; flex-direction: column; padding: 8px; gap: 6px; overflow: hidden; }
+        .page.active { display: flex; }
+
+        .card { background: #fff; border-radius: 12px; box-shadow: 0 1px 4px rgba(0,0,0,0.05); overflow: hidden; position: relative; }
+        .card-dark { background: #1a1a1a; }
+        .card-label { position: absolute; top: 6px; left: 6px; background: rgba(0,0,0,0.5); color: #fff; padding: 2px 6px; border-radius: 4px; font-size: 9px; font-weight: 600; z-index: 2; }
+        .placeholder { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: rgba(255,255,255,0.4); font-size: 11px; }
+
+        .row { display: flex; gap: 6px; }
+        .col { display: flex; flex-direction: column; gap: 6px; }
+        .flex-1 { flex: 1; }
+        .flex-2 { flex: 2; }
+
+        .camera-card { aspect-ratio: 16/9; min-height: 0; }
+        .camera-card img { width: 100%; height: 100%; object-fit: contain; position: absolute; top: 0; left: 0; background: #000; }
+
+        .lidar-card { min-height: 100px; }
+        .lidar-card canvas { width: 100%; height: 100%; }
+        .lidar-stats { position: absolute; bottom: 4px; right: 6px; background: rgba(0,0,0,0.5); color: #fff; padding: 2px 6px; border-radius: 4px; font-size: 9px; }
+
+        .joystick-card { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 8px; }
+        .joystick-zone { width: 110px; height: 110px; background: linear-gradient(145deg, #f0f0f3, #fafafa); border-radius: 50%; box-shadow: inset 0 2px 6px rgba(0,0,0,0.08); position: relative; }
+        .odom-display { display: flex; gap: 8px; margin-top: 6px; font-size: 10px; color: #86868b; }
+        .odom-display b { color: #1d1d1f; }
+
+        .speed-bar { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: #fff; border-radius: 10px; }
+        .speed-slider { flex: 1; height: 6px; -webkit-appearance: none; background: #e5e5ea; border-radius: 3px; transition: all 0.2s; }
+        .speed-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 24px; height: 24px; background: #007aff; border-radius: 50%; cursor: pointer; box-shadow: 0 2px 6px rgba(0,122,255,0.4); transition: transform 0.15s; }
+        .speed-slider::-webkit-slider-thumb:active { transform: scale(1.15); }
+        .speed-slider:active { background: #d1d1d6; }
+        .speed-label { font-size: 11px; color: #86868b; }
+        .speed-val { font-size: 12px; font-weight: 600; color: #007aff; min-width: 35px; text-align: right; }
+
+        .mode-section { padding: 10px; }
+        .mode-title { font-size: 10px; font-weight: 600; color: #86868b; text-transform: uppercase; margin-bottom: 8px; }
+        .mode-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+        .mode-btn { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 10px 6px; background: #f5f5f7; border: 2px solid transparent; border-radius: 10px; cursor: pointer; }
+        .mode-btn.active { border-color: #007aff; background: rgba(0,122,255,0.08); }
+        .mode-btn:active { transform: scale(0.96); }
+        .mode-icon { font-size: 22px; }
+        .mode-name { font-size: 10px; font-weight: 500; color: #1d1d1f; }
+        .mode-btn.active .mode-name { color: #007aff; }
+        .current-mode { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; background: linear-gradient(135deg, #007aff, #5856d6); border-radius: 10px; }
+        .current-mode span:first-child { font-size: 11px; color: rgba(255,255,255,0.7); }
+        .current-mode span:last-child { font-size: 15px; font-weight: 600; color: #fff; }
+
+        .map-card { flex: 1; min-height: 160px; }
+        #mapDiv { width: 100%; height: 100%; }
+        #mapDiv canvas { width: 100% !important; height: 100% !important; }
+        .map-toolbar { position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%); display: flex; gap: 6px; z-index: 2; }
+        .map-btn { padding: 8px 12px; border: none; border-radius: 20px; font-size: 10px; font-weight: 600; cursor: pointer; }
+        .map-btn.blue { background: #007aff; color: #fff; }
+        .map-btn.green { background: #34c759; color: #fff; }
+        .map-btn.gray { background: rgba(255,255,255,0.3); backdrop-filter: blur(10px); color: #fff; }
+        .map-btn.active { box-shadow: 0 0 0 2px #fff; }
+        .map-status { position: absolute; top: 6px; right: 6px; display: flex; gap: 4px; z-index: 2; }
+        .map-badge { background: rgba(0,0,0,0.5); color: #fff; padding: 3px 8px; border-radius: 4px; font-size: 9px; font-weight: 600; }
+        .map-badge.on { background: #34c759; }
+
+        .info-panel { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; padding: 8px; }
+        .info-box { background: #f5f5f7; border-radius: 8px; padding: 6px; text-align: center; }
+        .info-label { font-size: 9px; color: #86868b; }
+        .info-value { font-size: 13px; font-weight: 600; color: #1d1d1f; margin-top: 2px; }
+
+    </style>
+</head>
+<body>
+    <div class="app">
+        <header class="header">
+            <div class="logo">
+                <img src="keti.png" alt="KETI" class="logo-icon">
+                <h1>SDV AI Robot</h1>
+            </div>
+            <div class="status">
+                <span class="status-dot" id="statusDot"></span>
+                <span id="statusText">Offline</span>
+            </div>
+        </header>
+
+        <nav class="tabs">
+            <div class="tabs-inner">
+                <button class="tab active" data-page="control">Control</button>
+                <button class="tab" data-page="mode">Mode</button>
+                <button class="tab" data-page="map">Map</button>
+            </div>
+        </nav>
+
+        <main class="main">
+            <!-- Control Page -->
+            <div class="page active" id="page-control">
+                <div class="card card-dark camera-card">
+                    <img id="cameraImg" src="" alt="">
+                    <div class="card-label">Camera</div>
+                    <div class="placeholder" id="cameraPlaceholder">Camera...</div>
+                </div>
+                <div class="row flex-1">
+                    <div class="card card-dark lidar-card flex-1">
+                        <canvas id="lidarCanvas"></canvas>
+                        <div class="card-label">LiDAR</div>
+                        <div class="lidar-stats" id="lidarStats">0</div>
+                    </div>
+                    <div class="card joystick-card flex-1">
+                        <div class="joystick-zone" id="joystickZone"></div>
+                        <div class="odom-display">
+                            <span>X:<b id="odomX">0.00</b></span>
+                            <span>Y:<b id="odomY">0.00</b></span>
+                            <span>θ:<b id="odomTh">0°</b></span>
+                        </div>
+                    </div>
+                </div>
+                <div class="speed-bar">
+                    <span class="speed-label">Speed</span>
+                    <input type="range" class="speed-slider" id="speedSlider" min="10" max="150" value="50">
+                    <span class="speed-val" id="speedVal">50%</span>
+                </div>
+            </div>
+
+            <!-- Mode Page - layout like Control -->
+            <div class="page" id="page-mode">
+                <div class="card card-dark camera-card">
+                    <img id="modeCameraImg" src="" alt="">
+                    <div class="card-label">AI Camera</div>
+                    <div class="current-mode" style="position:absolute; bottom:8px; right:8px; width:auto;">
+                        <span>Mode</span>
+                        <span id="currentModeValue">Manual</span>
+                    </div>
+                </div>
+                <div class="row flex-1">
+                    <div class="card card-dark lidar-card flex-1">
+                        <canvas id="modeLidarCanvas"></canvas>
+                        <div class="card-label">LiDAR</div>
+                    </div>
+                    <div class="card joystick-card flex-1">
+                        <div class="joystick-zone" id="modeJoystick"></div>
+                    </div>
+                </div>
+                <div class="card mode-section">
+                    <div class="mode-grid" style="grid-template-columns: repeat(4, 1fr);">
+                        <button class="mode-btn active" data-mode="manual"><span class="mode-icon">🎮</span><span class="mode-name">Manual</span></button>
+                        <button class="mode-btn" data-mode="obstacle"><span class="mode-icon">🚧</span><span class="mode-name">Obstacle</span></button>
+                        <button class="mode-btn" data-mode="patrol"><span class="mode-icon">🔄</span><span class="mode-name">Patrol</span></button>
+                        <button class="mode-btn" data-mode="follower"><span class="mode-icon">👤</span><span class="mode-name">Follower</span></button>
+                        <button class="mode-btn" data-mode="lane"><span class="mode-icon">🛣️</span><span class="mode-name">Lane</span></button>
+                        <button class="mode-btn" data-mode="yolo"><span class="mode-icon">🎯</span><span class="mode-name">YOLO</span></button>
+                        <button class="mode-btn" data-mode="parking"><span class="mode-icon">🅿️</span><span class="mode-name">Parking</span></button>
+                        <button class="mode-btn" data-mode="nav"><span class="mode-icon">🧭</span><span class="mode-name">Nav</span></button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Map Page -->
+            <div class="page" id="page-map">
+                <div class="card card-dark map-card flex-1">
+                    <div id="mapDiv"></div>
+                    <div class="card-label">/map</div>
+                    <div class="map-status">
+                        <span class="map-badge" id="slamBadge">SLAM</span>
+                        <span class="map-badge" id="navBadge">NAV</span>
+                    </div>
+                    <div class="placeholder" id="mapPlaceholder">Start SLAM</div>
+                    <div class="map-toolbar">
+                        <button class="map-btn blue" id="btnSlam">SLAM</button>
+                        <button class="map-btn gray" id="btnSave">SAVE</button>
+                        <button class="map-btn gray" id="btnLoad">LOAD</button>
+                        <button class="map-btn green" id="btnNav">NAV</button>
+                        <button class="map-btn gray" id="btnGoal">GOAL</button>
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="card flex-2 info-panel">
+                        <div class="info-box"><div class="info-label">X</div><div class="info-value" id="mapX">0.00</div></div>
+                        <div class="info-box"><div class="info-label">Y</div><div class="info-value" id="mapY">0.00</div></div>
+                        <div class="info-box"><div class="info-label">θ</div><div class="info-value" id="mapTh">0°</div></div>
+                        <div class="info-box"><div class="info-label">Status</div><div class="info-value" id="mapStatus">Ready</div></div>
+                    </div>
+                    <div class="card joystick-card flex-1">
+                        <div class="joystick-zone" id="mapJoystick"></div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+
+    <script>
+        document.addEventListener('touchmove', e => e.preventDefault(), { passive: false });
+
+        let ros, cmdVelPub, goalPub;
+        let isConnected = false;
+        let speedMult = 0.5;
+        let currentMode = 'manual';
+        let slamOn = false, navOn = false, goalMode = false;
+        const MAX_LIN = 0.5, MAX_ANG = 2.0;
+
+        const lidarCanvas = document.getElementById('lidarCanvas');
+        const modeLidarCanvas = document.getElementById('modeLidarCanvas');
+        let lidarPts = [];
+        let pose = { x: 0, y: 0, th: 0 };
+
+        let mapViewer = null, gridClient = null, robotMarker = null;
+        let globalPathShape = null, localPathShape = null;
+
+        function resizeCanvas() {
+            [lidarCanvas, modeLidarCanvas].forEach(c => {
+                if (c?.parentElement) {
+                    const r = c.parentElement.getBoundingClientRect();
+                    c.width = r.width; c.height = r.height;
+                }
+            });
+            resizeMapViewer();
+            drawLidar();
+        }
+
+        function resizeMapViewer() {
+            const div = document.getElementById('mapDiv');
+            if (div && mapViewer && div.parentElement) {
+                const r = div.parentElement.getBoundingClientRect();
+                if (r.width > 0 && r.height > 0) mapViewer.resize(r.width, r.height);
+            }
+        }
+
+        window.addEventListener('resize', resizeCanvas);
+        setTimeout(resizeCanvas, 200);
+
+        document.querySelectorAll('.tab').forEach(t => {
+            t.addEventListener('click', () => {
+                document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+                document.querySelectorAll('.page').forEach(x => x.classList.remove('active'));
+                t.classList.add('active');
+                document.getElementById(`page-${t.dataset.page}`).classList.add('active');
+                setTimeout(() => { resizeCanvas(); refreshJoysticks(); }, 100);
+            });
+        });
+
+        document.getElementById('speedSlider').addEventListener('input', e => {
+            speedMult = e.target.value / 100;
+            document.getElementById('speedVal').textContent = e.target.value + '%';
+        });
+
+        // Camera - MJPEG stream from camera_node HTTP server (port 8080)
+        const enableCam = () => {
+            const host = location.hostname || 'localhost';
+            const url = `http://${host}:8080/stream`;
+            document.getElementById('cameraImg').src = url;
+            document.getElementById('modeCameraImg').src = url;
+            document.getElementById('cameraImg').onload = () => {
+                document.getElementById('cameraPlaceholder').style.display = 'none';
+            };
+        };
+
+        document.querySelectorAll('.mode-btn').forEach(b => {
+            b.addEventListener('click', () => setMode(b.dataset.mode));
+        });
+
+        const setMode = mode => {
+            currentMode = mode;
+            document.querySelectorAll('.mode-btn').forEach(b => {
+                b.classList.toggle('active', b.dataset.mode === mode);
+            });
+            document.getElementById('currentModeValue').textContent = mode.charAt(0).toUpperCase() + mode.slice(1);
+            if (ros && isConnected) {
+                new ROSLIB.Topic({ ros, name: '/robot/mode', messageType: 'std_msgs/String' })
+                    .publish(new ROSLIB.Message({ data: mode }));
+            }
+            console.log(`Mode: ${mode}`);
+        };
+
+        const connect = () => {
+            const host = location.hostname || 'localhost';
+            ros = new ROSLIB.Ros({ url: `ws://${host}:9090` });
+            ros.on('connection', () => {
+                isConnected = true;
+                document.getElementById('statusDot').classList.add('ok');
+                document.getElementById('statusText').textContent = 'Online';
+                setupTopics();
+                setupMapViewer();
+                enableCam();
+            });
+            ros.on('close', () => {
+                isConnected = false;
+                document.getElementById('statusDot').classList.remove('ok');
+                document.getElementById('statusText').textContent = 'Offline';
+                setTimeout(connect, 2000);
+            });
+        };
+
+        const setupTopics = () => {
+            // cmd_vel - reliable, higher priority
+            cmdVelPub = new ROSLIB.Topic({ ros, name: '/cmd_vel', messageType: 'geometry_msgs/Twist', queue_size: 1 });
+            goalPub = new ROSLIB.Topic({ ros, name: '/goal_pose', messageType: 'geometry_msgs/PoseStamped' });
+            // LiDAR - best effort
+            new ROSLIB.Topic({ ros, name: '/scan', messageType: 'sensor_msgs/LaserScan', queue_length: 1, throttle_rate: 150 }).subscribe(onLidar);
+            new ROSLIB.Topic({ ros, name: '/odom', messageType: 'nav_msgs/Odometry', queue_length: 1 }).subscribe(onOdom);
+            new ROSLIB.Topic({ ros, name: '/plan', messageType: 'nav_msgs/Path', queue_length: 1 }).subscribe(onGlobalPath);
+            new ROSLIB.Topic({ ros, name: '/local_plan', messageType: 'nav_msgs/Path', queue_length: 1 }).subscribe(onLocalPath);
+        };
+
+        const setupMapViewer = () => {
+            const mapDiv = document.getElementById('mapDiv');
+            if (!mapDiv) return;
+            const r = mapDiv.parentElement.getBoundingClientRect();
+            mapViewer = new ROS2D.Viewer({ divID: 'mapDiv', width: r.width || 300, height: r.height || 200 });
+            gridClient = new ROS2D.OccupancyGridClient({ ros: ros, rootObject: mapViewer.scene, continuous: true });
+            gridClient.on('change', () => {
+                mapViewer.scaleToDimensions(gridClient.currentGrid.width, gridClient.currentGrid.height);
+                mapViewer.shift(gridClient.currentGrid.pose.position.x, gridClient.currentGrid.pose.position.y);
+                document.getElementById('mapPlaceholder').style.display = 'none';
+            });
+            robotMarker = new ROS2D.NavigationArrow({ size: 0.25, strokeSize: 0.05, fillColor: createjs.Graphics.getRGB(0, 122, 255) });
+            mapViewer.scene.addChild(robotMarker);
+            globalPathShape = new createjs.Shape();
+            localPathShape = new createjs.Shape();
+            mapViewer.scene.addChild(globalPathShape);
+            mapViewer.scene.addChild(localPathShape);
+        };
+
+        const onGlobalPath = path => {
+            if (!globalPathShape || !path.poses || path.poses.length < 2) return;
+            const g = globalPathShape.graphics.clear();
+            g.setStrokeStyle(0.05).beginStroke('#34c759');
+            path.poses.forEach((p, i) => {
+                if (i === 0) g.moveTo(p.pose.position.x, -p.pose.position.y);
+                else g.lineTo(p.pose.position.x, -p.pose.position.y);
+            });
+            g.endStroke();
+        };
+
+        const onLocalPath = path => {
+            if (!localPathShape || !path.poses || path.poses.length < 2) return;
+            const g = localPathShape.graphics.clear();
+            g.setStrokeStyle(0.03).beginStroke('#ff9500');
+            path.poses.forEach((p, i) => {
+                if (i === 0) g.moveTo(p.pose.position.x, -p.pose.position.y);
+                else g.lineTo(p.pose.position.x, -p.pose.position.y);
+            });
+            g.endStroke();
+        };
+
+        // LiDAR - fixed mirror, distance colors, no blur
+        let lastDraw = 0;
+        const onLidar = scan => {
+            lidarPts = [];
+            for (let i = 0; i < scan.ranges.length; i += 4) {
+                const r = scan.ranges[i];
+                if (r > scan.range_min && r < Math.min(scan.range_max, 6)) {
+                    const a = scan.angle_min + i * scan.angle_increment;
+                    lidarPts.push({
+                        x: r * Math.cos(a - Math.PI/2),
+                        y: r * Math.sin(a - Math.PI/2),
+                        d: r
+                    });
+                }
+            }
+            if (Date.now() - lastDraw > 100) { lastDraw = Date.now(); drawLidar(); }
+        };
+
+        // Distance to color (red=near, yellow=mid, green=far)
+        const distColor = d => {
+            if (d < 0.5) return '#ff0000';
+            if (d < 1) return '#ff4400';
+            if (d < 2) return '#ff8800';
+            if (d < 3) return '#ffff00';
+            if (d < 4) return '#88ff00';
+            return '#00ff00';
+        };
+
+        const drawLidar = () => {
+            [lidarCanvas, modeLidarCanvas].forEach(canvas => {
+                if (!canvas || !canvas.width) return;
+                const ctx = canvas.getContext('2d');
+                const cx = canvas.width / 2, cy = canvas.height / 2;
+                const sc = Math.min(canvas.width, canvas.height) / 8;
+
+                ctx.fillStyle = '#111';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                // Grid circles
+                ctx.strokeStyle = '#333';
+                ctx.lineWidth = 1;
+                [1, 2, 3].forEach(r => {
+                    ctx.beginPath();
+                    ctx.arc(cx, cy, r * sc, 0, Math.PI * 2);
+                    ctx.stroke();
+                });
+
+                // Points with distance colors
+                lidarPts.forEach(p => {
+                    ctx.fillStyle = distColor(p.d);
+                    ctx.beginPath();
+                    ctx.arc(cx + p.x * sc, cy + p.y * sc, 2, 0, Math.PI * 2);
+                    ctx.fill();
+                });
+
+                // Robot
+                ctx.fillStyle = '#00aaff';
+                ctx.beginPath();
+                ctx.arc(cx, cy, 4, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Direction
+                ctx.beginPath();
+                ctx.moveTo(cx, cy - 7);
+                ctx.lineTo(cx - 3, cy);
+                ctx.lineTo(cx + 3, cy);
+                ctx.closePath();
+                ctx.fill();
+            });
+            document.getElementById('lidarStats').textContent = lidarPts.length;
+        };
+
+        const onOdom = o => {
+            pose.x = o.pose.pose.position.x;
+            pose.y = o.pose.pose.position.y;
+            const q = o.pose.pose.orientation;
+            pose.th = Math.atan2(2 * (q.w * q.z), 1 - 2 * q.z * q.z);
+            const deg = Math.round(pose.th * 180 / Math.PI);
+
+            ['odom', 'map'].forEach(prefix => {
+                const xEl = document.getElementById(prefix + 'X');
+                const yEl = document.getElementById(prefix + 'Y');
+                const thEl = document.getElementById(prefix + 'Th');
+                if (xEl) xEl.textContent = pose.x.toFixed(2);
+                if (yEl) yEl.textContent = pose.y.toFixed(2);
+                if (thEl) thEl.textContent = deg + '°';
+            });
+
+            if (robotMarker) {
+                robotMarker.x = pose.x;
+                robotMarker.y = -pose.y;
+                robotMarker.rotation = -pose.th * 180 / Math.PI;
+            }
+        };
+
+        document.getElementById('btnSlam').addEventListener('click', () => {
+            slamOn = !slamOn;
+            document.getElementById('slamBadge').classList.toggle('on', slamOn);
+            document.getElementById('btnSlam').classList.toggle('active', slamOn);
+            document.getElementById('mapStatus').textContent = slamOn ? 'SLAM' : 'Ready';
+            console.log(slamOn ? 'SLAM Started' : 'SLAM Stopped');
+        });
+
+        document.getElementById('btnNav').addEventListener('click', () => {
+            navOn = !navOn;
+            document.getElementById('navBadge').classList.toggle('on', navOn);
+            document.getElementById('btnNav').classList.toggle('active', navOn);
+            document.getElementById('mapStatus').textContent = navOn ? 'NAV' : 'Ready';
+            console.log(navOn ? 'Nav Started' : 'Nav Stopped');
+        });
+
+        document.getElementById('btnGoal').addEventListener('click', () => {
+            goalMode = !goalMode;
+            document.getElementById('btnGoal').classList.toggle('active', goalMode);
+            console.log(goalMode ? 'Click map to set goal' : 'Goal mode off');
+        });
+
+        document.getElementById('btnSave').addEventListener('click', () => console.log('Map Saved'));
+        document.getElementById('btnLoad').addEventListener('click', () => console.log('Map Loaded'));
+
+        document.getElementById('mapDiv').addEventListener('click', e => {
+            if (!goalMode || !mapViewer || !goalPub) return;
+            const rect = e.target.getBoundingClientRect();
+            const x = (e.clientX - rect.left) / rect.width;
+            const y = (e.clientY - rect.top) / rect.height;
+            const mapX = (x - 0.5) * 10;
+            const mapY = -(y - 0.5) * 10;
+            goalPub.publish(new ROSLIB.Message({
+                header: { frame_id: 'map' },
+                pose: { position: { x: mapX, y: mapY, z: 0 }, orientation: { x: 0, y: 0, z: 0, w: 1 } }
+            }));
+            console.log(`Goal: (${mapX.toFixed(1)}, ${mapY.toFixed(1)})`);
+            goalMode = false;
+            document.getElementById('btnGoal').classList.remove('active');
+        });
+
+        let joysticks = {};
+        const setupJoystick = id => {
+            const zone = document.getElementById(id);
+            if (!zone) return null;
+            return nipplejs.create({ zone: zone, mode: 'static', position: { left: '50%', top: '50%' }, color: '#007aff', size: 100, restOpacity: 0.7 })
+                .on('move', (e, d) => {
+                    const f = Math.min(d.force, 2) / 2, a = d.angle.radian;
+                    sendVel(Math.sin(a) * f * MAX_LIN * speedMult * 2, -Math.cos(a) * f * MAX_ANG * speedMult * 2);
+                }).on('end', stopBot);
+        };
+
+        const refreshJoysticks = () => {
+            Object.values(joysticks).forEach(j => j?.destroy());
+            joysticks = {
+                ctrl: setupJoystick('joystickZone'),
+                mode: setupJoystick('modeJoystick'),
+                map: setupJoystick('mapJoystick')
+            };
+        };
+
+        // Smooth velocity control - prevents jerky movement
+        let tL = 0, tA = 0, cL = 0, cA = 0, vLoop = null;
+        const SMOOTH = 0.10;  // 0.06=very smooth, 0.10=balanced, 0.15=fast
+        const sendVel = (l, a) => { tL = l; tA = a; if (!vLoop) vLoop = setInterval(pubVel, 20); };
+        const pubVel = () => {
+            if (!cmdVelPub || !isConnected) return;
+            cL += (tL - cL) * SMOOTH; cA += (tA - cA) * SMOOTH;
+            if (Math.abs(cL) < 0.005) cL = 0; if (Math.abs(cA) < 0.005) cA = 0;
+            cmdVelPub.publish(new ROSLIB.Message({ linear: { x: cL, y: 0, z: 0 }, angular: { x: 0, y: 0, z: cA } }));
+            if (!tL && !tA && Math.abs(cL) < 0.005 && Math.abs(cA) < 0.005) { clearInterval(vLoop); vLoop = null; }
+        };
+        const stopBot = () => {
+            tL = tA = 0;  // Target zero, let smoothing handle deceleration
+            // Don't immediately zero cL/cA - let pubVel smooth the stop
+        };
+
+        document.addEventListener('keydown', e => {
+            const s = speedMult * 2;
+            if (e.key === 'w') sendVel(MAX_LIN * s, 0);
+            else if (e.key === 's') sendVel(-MAX_LIN * s, 0);
+            else if (e.key === 'a') sendVel(0, MAX_ANG * s);
+            else if (e.key === 'd') sendVel(0, -MAX_ANG * s);
+            else if (e.key === ' ') stopBot();
+        });
+        document.addEventListener('keyup', e => { if ('wasd'.includes(e.key)) stopBot(); });
+
+        // Start camera immediately (don't wait for rosbridge)
+        enableCam();
+        connect();
+        setTimeout(refreshJoysticks, 300);
+    </script>
+</body>
+</html>

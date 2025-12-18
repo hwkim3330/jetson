@@ -1,0 +1,25 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>robot</name>
+  <version>2.0.0</version>
+  <description>
+    ROS 2 packages for robot
+  </description>
+  <maintainer email="keti@keti.re.kr">KETI</maintainer>
+  <license>Apache 2.0</license>
+  <url type="website">http://keti.co.kr</url>
+  <author email="kate.brighteyes@gmail.com">Kate</author>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <exec_depend>rf2o_laser_odometry</exec_depend>
+  <exec_depend>robot_bringup</exec_depend>
+  <exec_depend>robot_slam</exec_depend>
+  <exec_depend>robot_description</exec_depend>
+  <exec_depend>robot_example</exec_depend>
+  <exec_depend>robot_navigation</exec_depend>
+  <exec_depend>robot_driver</exec_depend>
+  <exec_depend>robot_teleop</exec_depend>
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

@@ -1,0 +1,33 @@
+# ROS2 build artifacts
+build/
+install/
+log/
+logs/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.bak
+*.log
+
+# Model files (too large)
+*.pt
+*.onnx
+*.engine
+*.trt
