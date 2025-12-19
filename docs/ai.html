@@ -380,13 +380,96 @@ class YoloDetector:
 </section>
 
 <section>
+    <h2>Complete Pipeline</h2>
+    <p>SDV Robot의 YOLO 파이프라인은 <strong>CompressedImage</strong>를 사용하여 네트워크 대역폭을 최적화합니다.</p>
+
+    <div class="diagram">
+     YOLO Detection Pipeline (Full Data Flow)
+     ═══════════════════════════════════════════════════════════════════════════════
+
+     ┌─────────────────────────────────────────────────────────────────────────────┐
+     │                              CAMERA LAYER                                    │
+     │  ┌──────────────┐     ┌──────────────┐     ┌────────────────────────────┐  │
+     │  │   IMX219     │ ──▶ │  GStreamer   │ ──▶ │  nvjpegenc (Hardware)      │  │
+     │  │   Sensor     │     │  Pipeline    │     │  JPEG Compression          │  │
+     │  │  640×360     │     │              │     │  Quality: 85%              │  │
+     │  └──────────────┘     └──────────────┘     └────────────────────────────┘  │
+     │                                                        │                    │
+     └────────────────────────────────────────────────────────┼────────────────────┘
+                                                              │
+                                /camera/image_raw/compressed  │ CompressedImage
+                                     (~50KB per frame)        │
+                                                              ▼
+     ┌─────────────────────────────────────────────────────────────────────────────┐
+     │                           YOLO DETECTOR NODE                                 │
+     │                                                                              │
+     │  ┌──────────────────────────────────────────────────────────────────────┐   │
+     │  │  1. JPEG Decompress (cv2.imdecode)                                   │   │
+     │  │     └─▶ np.frombuffer(msg.data) → cv2.imdecode(IMREAD_COLOR)         │   │
+     │  └──────────────────────────────────────────────────────────────────────┘   │
+     │                              │                                               │
+     │                              ▼                                               │
+     │  ┌──────────────────────────────────────────────────────────────────────┐   │
+     │  │  2. Preprocess (Ultralytics)                                         │   │
+     │  │     └─▶ Resize 640×640 → Normalize → BGR→RGB → NCHW tensor          │   │
+     │  └──────────────────────────────────────────────────────────────────────┘   │
+     │                              │                                               │
+     │                              ▼                                               │
+     │  ┌──────────────────────────────────────────────────────────────────────┐   │
+     │  │  3. TensorRT Inference (GPU)                                         │   │
+     │  │     └─▶ yolov8n.engine (FP16) → 6.8ms → Raw predictions              │   │
+     │  └──────────────────────────────────────────────────────────────────────┘   │
+     │                              │                                               │
+     │                              ▼                                               │
+     │  ┌──────────────────────────────────────────────────────────────────────┐   │
+     │  │  4. Postprocess (NMS + Filter)                                       │   │
+     │  │     └─▶ conf > 0.5 → IoU NMS → Bounding boxes + Classes              │   │
+     │  └──────────────────────────────────────────────────────────────────────┘   │
+     │                              │                                               │
+     └──────────────────────────────┼───────────────────────────────────────────────┘
+                                    │
+              ┌─────────────────────┼─────────────────────┐
+              │                     │                     │
+              ▼                     ▼                     ▼
+     ┌──────────────┐      ┌──────────────┐      ┌──────────────┐
+     │ /detections  │      │/person_target│      │ /yolo/debug  │
+     │   (JSON)     │      │   (Point)    │      │   (Image)    │
+     │              │      │ x,y position │      │  with boxes  │
+     └──────────────┘      └──────────────┘      └──────────────┘
+              │
+              ▼
+     ┌─────────────────────────────────────────────────────────────────────────────┐
+     │                              WEB UI                                          │
+     │  rosbridge (9090) ──▶ JSON.parse ──▶ Canvas overlay (bounding boxes)        │
+     └─────────────────────────────────────────────────────────────────────────────┘
+    </div>
+
+    <div class="success-box">
+        <strong>CompressedImage 사용</strong>: 카메라는 <code>nvjpegenc</code>로 하드웨어 JPEG 압축을 수행하고, YOLO 노드는 <code>/camera/image_raw/compressed</code>를 구독합니다. Raw 이미지 대비 네트워크 대역폭 ~90% 절감!
+    </div>
+
+    <h3>Pipeline Latency Breakdown</h3>
+    <table>
+        <tr><th>Stage</th><th>Time</th><th>Notes</th></tr>
+        <tr><td>JPEG Decompress</td><td>~0.3 ms</td><td>cv2.imdecode (CPU)</td></tr>
+        <tr><td>Preprocess</td><td>~0.5 ms</td><td>Resize, normalize (CPU)</td></tr>
+        <tr><td>TensorRT Inference</td><td>~6.8 ms</td><td>GPU FP16</td></tr>
+        <tr><td>NMS Postprocess</td><td>~0.3 ms</td><td>Filter boxes (CPU)</td></tr>
+        <tr><td><strong>Total</strong></td><td><strong>~7.6 ms</strong></td><td>147 FPS theoretical</td></tr>
+    </table>
+</section>
+
+<section>
     <h2>ROS2 Topics</h2>
 
     <table>
         <tr><th>Topic</th><th>Type</th><th>Description</th></tr>
-        <tr><td><code>/camera/image_raw</code></td><td>Image</td><td>카메라 입력 이미지</td></tr>
+        <tr><td><code>/camera/image_raw/compressed</code></td><td>CompressedImage</td><td>JPEG 압축 이미지 (입력)</td></tr>
         <tr><td><code>/detections</code></td><td>String (JSON)</td><td>검출 결과</td></tr>
         <tr><td><code>/person_detected</code></td><td>Bool</td><td>사람 감지 플래그</td></tr>
+        <tr><td><code>/person_target</code></td><td>Point</td><td>사람 위치 (-1~1 정규화)</td></tr>
+        <tr><td><code>/person_distance</code></td><td>Float32</td><td>추정 거리 (m)</td></tr>
+        <tr><td><code>/yolo/debug</code></td><td>Image</td><td>바운딩박스 포함 디버그 이미지</td></tr>
         <tr><td><code>/robot/ai_mode</code></td><td>String</td><td>AI 모드 제어 (yolo/off)</td></tr>
     </table>
 
@@ -449,6 +532,306 @@ class YoloDetector:
 </section>
 
 <section>
+    <h2>OpenCV Feature Extensions</h2>
+    <p>YOLO 외에도 OpenCV를 활용하여 다양한 컴퓨터 비전 기능을 추가할 수 있습니다.</p>
+
+    <div class="cards">
+        <div class="card primary">
+            <h3>🎯 Object Following</h3>
+            <p>감지된 객체를 추적하며 따라가기</p>
+            <ul>
+                <li>사람/물체 중심점 추적</li>
+                <li>PID 제어로 부드러운 추종</li>
+                <li>거리 유지 (Bbox 크기 기반)</li>
+            </ul>
+        </div>
+        <div class="card primary">
+            <h3>✋ Gesture Recognition</h3>
+            <p>손동작으로 로봇 제어</p>
+            <ul>
+                <li>MediaPipe Hand Landmarks</li>
+                <li>커스텀 제스처 정의</li>
+                <li>손짓으로 이동/정지 명령</li>
+            </ul>
+        </div>
+        <div class="card primary">
+            <h3>🔴 Color Tracking</h3>
+            <p>특정 색상 객체 추적</p>
+            <ul>
+                <li>HSV 색공간 변환</li>
+                <li>마스크 기반 필터링</li>
+                <li>컨투어 검출</li>
+            </ul>
+        </div>
+        <div class="card primary">
+            <h3>🛤️ Lane Following</h3>
+            <p>바닥 라인 따라 주행</p>
+            <ul>
+                <li>Canny Edge Detection</li>
+                <li>Hough Line Transform</li>
+                <li>조향 각도 계산</li>
+            </ul>
+        </div>
+    </div>
+
+    <h3>Example: Object Following Implementation</h3>
+<pre>
+# object_follower.py - 사람 따라가기 예제
+import cv2
+import numpy as np
+
+class ObjectFollower:
+    def __init__(self):
+        self.target_distance = 1.0  # 1m 거리 유지
+        self.kp_linear = 0.5
+        self.kp_angular = 1.0
+
+    def follow(self, person_target, person_distance):
+        """
+        person_target: Point (x, y normalized -1 to 1)
+        person_distance: estimated distance in meters
+        """
+        # Angular: turn toward person (x < 0 = left, x > 0 = right)
+        angular_vel = -self.kp_angular * person_target.x
+
+        # Linear: move forward/back to maintain distance
+        distance_error = person_distance - self.target_distance
+        linear_vel = self.kp_linear * distance_error
+
+        # Clamp velocities
+        linear_vel = np.clip(linear_vel, -0.2, 0.3)
+        angular_vel = np.clip(angular_vel, -1.0, 1.0)
+
+        return linear_vel, angular_vel
+</pre>
+
+    <h3>Example: Color Tracking</h3>
+<pre>
+# color_tracker.py - 빨간색 물체 추적
+import cv2
+import numpy as np
+
+def track_red_object(frame):
+    # Convert to HSV
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+
+    # Red color range (wraps around 0)
+    lower_red1 = np.array([0, 100, 100])
+    upper_red1 = np.array([10, 255, 255])
+    lower_red2 = np.array([160, 100, 100])
+    upper_red2 = np.array([180, 255, 255])
+
+    # Create masks
+    mask1 = cv2.inRange(hsv, lower_red1, upper_red1)
+    mask2 = cv2.inRange(hsv, lower_red2, upper_red2)
+    mask = mask1 + mask2
+
+    # Find contours
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    if contours:
+        # Get largest contour
+        largest = max(contours, key=cv2.contourArea)
+        if cv2.contourArea(largest) > 500:  # Min area filter
+            M = cv2.moments(largest)
+            cx = int(M['m10'] / M['m00'])
+            cy = int(M['m01'] / M['m00'])
+            return (cx, cy), mask
+
+    return None, mask
+</pre>
+
+    <h3>Example: Gesture Control</h3>
+<pre>
+# gesture_control.py - 손동작 제어 (MediaPipe 필요)
+import mediapipe as mp
+
+mp_hands = mp.solutions.hands
+hands = mp_hands.Hands(max_num_hands=1, min_detection_confidence=0.7)
+
+def detect_gesture(frame):
+    """
+    Returns:
+    - 'stop': 손바닥 펼침 (5손가락)
+    - 'forward': 주먹 (0손가락)
+    - 'left': 검지만 왼쪽 가리킴
+    - 'right': 검지만 오른쪽 가리킴
+    - None: 손 없음
+    """
+    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    results = hands.process(rgb)
+
+    if not results.multi_hand_landmarks:
+        return None
+
+    hand = results.multi_hand_landmarks[0]
+
+    # Count extended fingers
+    fingers_up = count_fingers(hand)
+
+    if fingers_up == 5:
+        return 'stop'
+    elif fingers_up == 0:
+        return 'forward'
+    elif fingers_up == 1:
+        # Check index finger direction
+        index_tip = hand.landmark[8]
+        index_pip = hand.landmark[6]
+        if index_tip.x < index_pip.x - 0.1:
+            return 'left'
+        elif index_tip.x > index_pip.x + 0.1:
+            return 'right'
+
+    return None
+</pre>
+
+    <h3>Example: Lane Following</h3>
+<pre>
+# lane_follower.py - 라인 따라가기
+import cv2
+import numpy as np
+
+def detect_lane(frame):
+    h, w = frame.shape[:2]
+
+    # ROI: bottom half of image
+    roi = frame[h//2:, :]
+
+    # Convert to grayscale
+    gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+
+    # Gaussian blur
+    blur = cv2.GaussianBlur(gray, (5, 5), 0)
+
+    # Canny edge detection
+    edges = cv2.Canny(blur, 50, 150)
+
+    # Hough lines
+    lines = cv2.HoughLinesP(edges, 1, np.pi/180, 50,
+                            minLineLength=50, maxLineGap=100)
+
+    if lines is not None:
+        # Calculate average line angle
+        angles = []
+        for line in lines:
+            x1, y1, x2, y2 = line[0]
+            angle = np.arctan2(y2 - y1, x2 - x1)
+            angles.append(angle)
+
+        avg_angle = np.mean(angles)
+
+        # Convert to steering command
+        # angle = 0: vertical line (go straight)
+        # angle > 0: tilted right (turn right)
+        steering = avg_angle * 2.0  # Gain
+        return np.clip(steering, -1.0, 1.0)
+
+    return 0.0  # No lines, go straight
+</pre>
+</section>
+
+<section>
+    <h2>Advanced AI Features</h2>
+    <p>"사람 보고 멈추기"를 넘어서, 더 재미있는 AI 기능들을 구현할 수 있습니다.</p>
+
+    <div class="cards">
+        <div class="card nvidia">
+            <h3>🐕 Pet Following</h3>
+            <p>반려동물 따라다니기</p>
+            <ul>
+                <li>YOLO class: dog, cat 추적</li>
+                <li>Kalman Filter로 부드러운 추적</li>
+                <li>거리 유지하며 따라가기</li>
+            </ul>
+        </div>
+        <div class="card nvidia">
+            <h3>🎾 Ball Chaser</h3>
+            <p>공 쫓아가기</p>
+            <ul>
+                <li>sports ball 클래스 또는 색상 추적</li>
+                <li>공 위치로 자동 이동</li>
+                <li>공에 가까워지면 정지</li>
+            </ul>
+        </div>
+        <div class="card nvidia">
+            <h3>🚶 Person Escort</h3>
+            <p>사람 옆에서 동행</p>
+            <ul>
+                <li>사람 옆 1m 거리 유지</li>
+                <li>사람 걷는 속도에 맞춤</li>
+                <li>장애물 회피하며 동행</li>
+            </ul>
+        </div>
+        <div class="card nvidia">
+            <h3>🎯 Object Finder</h3>
+            <p>특정 물체 찾아가기</p>
+            <ul>
+                <li>"컵을 찾아줘" 명령 처리</li>
+                <li>탐색하며 물체 검색</li>
+                <li>발견 시 해당 위치로 이동</li>
+            </ul>
+        </div>
+    </div>
+
+    <h3>Kalman Filter for Smooth Tracking</h3>
+    <div class="info-box">
+        <strong>왜 Kalman Filter?</strong> YOLO 검출은 프레임마다 약간씩 떨립니다. Kalman Filter를 사용하면 부드러운 추적이 가능합니다.
+    </div>
+
+<pre>
+# kalman_tracker.py - 부드러운 객체 추적
+import numpy as np
+from filterpy.kalman import KalmanFilter
+
+class SmoothTracker:
+    def __init__(self):
+        self.kf = KalmanFilter(dim_x=4, dim_z=2)  # [x, y, vx, vy]
+
+        # State transition matrix (constant velocity model)
+        self.kf.F = np.array([
+            [1, 0, 1, 0],
+            [0, 1, 0, 1],
+            [0, 0, 1, 0],
+            [0, 0, 0, 1]
+        ])
+
+        # Measurement matrix
+        self.kf.H = np.array([
+            [1, 0, 0, 0],
+            [0, 1, 0, 0]
+        ])
+
+        # Measurement noise
+        self.kf.R *= 10
+
+        # Process noise
+        self.kf.Q *= 0.1
+
+        self.initialized = False
+
+    def update(self, detection):
+        """
+        detection: (x, y) tuple or None if no detection
+        Returns: smoothed (x, y) position
+        """
+        if detection is not None:
+            if not self.initialized:
+                self.kf.x = np.array([detection[0], detection[1], 0, 0])
+                self.initialized = True
+            else:
+                self.kf.predict()
+                self.kf.update(np.array(detection))
+        else:
+            if self.initialized:
+                self.kf.predict()
+
+        if self.initialized:
+            return self.kf.x[0], self.kf.x[1]
+        return None
+</pre>
+</section>
+
+<section>
     <h2>Troubleshooting</h2>
 
     <table>
@@ -458,6 +841,8 @@ class YoloDetector:
         <tr><td>오탐지 많음</td><td>낮은 confidence</td><td>confidence 임계값 상향</td></tr>
         <tr><td>메모리 부족</td><td>엔진 크기</td><td>더 작은 모델 사용 (yolov8n)</td></tr>
         <tr><td>GPU 오류</td><td>CUDA 버전</td><td>JetPack/TensorRT 버전 확인</td></tr>
+        <tr><td>추적 떨림</td><td>YOLO 노이즈</td><td>Kalman Filter 적용</td></tr>
+        <tr><td>색상 추적 실패</td><td>조명 변화</td><td>HSV 범위 조정, 적응형 임계값</td></tr>
     </table>
 </section>
 

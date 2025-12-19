@@ -693,13 +693,15 @@ function drawMap() {
         mapCtx.fill();
     }
 
-    // Draw robot (blue triangle at center, arrow points up=forward)
+    // Draw robot (blue triangle at center)
+    // ROS: theta=0 is +X (right), theta=PI/2 is +Y (up on canvas after Y-flip)
+    // Arrow drawn pointing UP, so we rotate by (PI/2 - theta) to align with ROS
     mapCtx.save();
     mapCtx.translate(cx, cy);
-    mapCtx.rotate(-robotPose.theta);
+    mapCtx.rotate(Math.PI/2 - robotPose.theta);  // Fixed: proper ROS→Canvas rotation
     mapCtx.fillStyle = '#007aff';
     mapCtx.beginPath();
-    mapCtx.moveTo(0, -12);   // tip points up (forward)
+    mapCtx.moveTo(0, -12);   // tip points up (will be rotated to match heading)
     mapCtx.lineTo(-8, 6);    // bottom left
     mapCtx.lineTo(8, 6);     // bottom right
     mapCtx.closePath();
@@ -765,7 +767,8 @@ function onOdom(m) {
     const x = m.pose.pose.position.x;
     const y = m.pose.pose.position.y;
     const q = m.pose.pose.orientation;
-    const t = Math.atan2(2*(q.w*q.z), 1-2*q.z*q.z);
+    // Full quaternion to yaw conversion (was missing q.x*q.y and q.y*q.y terms)
+    const t = Math.atan2(2*(q.w*q.z + q.x*q.y), 1 - 2*(q.y*q.y + q.z*q.z));
 
     // Store odom frame pose
     odomPose = {x: x, y: y, theta: t};
@@ -845,13 +848,32 @@ function initJoys() {
     joys = { j1: mkJoy('jz1'), j2: mkJoy('jz2'), j3: mkJoy('jz3') };
 }
 
-// Velocity - direct control, no smoothing
-let tL=0, tA=0, lp=null, keys={};
+// Velocity control with smoothing to prevent jerky movement
+let tL=0, tA=0;          // Target velocity
+let cL=0, cA=0;          // Current velocity (smoothed)
+let lp=null, keys={};
+const RAMP_RATE = 0.15;  // Velocity change per 50ms (lower = smoother)
+
 function send(l, a) { tL = l; tA = a; if(!lp) lp = setInterval(pub, 50); }
 function pub() {
     if(!cmdVel || !conn) return;
-    cmdVel.publish(new ROSLIB.Message({linear:{x:tL,y:0,z:0}, angular:{x:0,y:0,z:tA}}));
-    if(!tL && !tA) { clearInterval(lp); lp = null; }
+
+    // Smooth velocity ramping (prevents jerky motor movement)
+    const dl = tL - cL;
+    const da = tA - cA;
+    if(Math.abs(dl) > RAMP_RATE) cL += Math.sign(dl) * RAMP_RATE;
+    else cL = tL;
+    if(Math.abs(da) > RAMP_RATE * 3) cA += Math.sign(da) * RAMP_RATE * 3;  // Angular can change faster
+    else cA = tA;
+
+    cmdVel.publish(new ROSLIB.Message({linear:{x:cL,y:0,z:0}, angular:{x:0,y:0,z:cA}}));
+
+    // Only stop interval when both target AND current are zero
+    if(!tL && !tA && Math.abs(cL) < 0.01 && Math.abs(cA) < 0.01) {
+        cL = cA = 0;  // Ensure exact zero
+        clearInterval(lp);
+        lp = null;
+    }
 }
 function stop() { tL = tA = 0; }
 
