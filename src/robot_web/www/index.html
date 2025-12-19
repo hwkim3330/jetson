@@ -631,15 +631,15 @@ function drawMap() {
         mapCtx.fill();
     }
 
-    // Draw robot (blue triangle at center, arrow points forward)
+    // Draw robot (blue triangle at center, arrow points up=forward)
     mapCtx.save();
     mapCtx.translate(cx, cy);
     mapCtx.rotate(-robotPose.theta);
     mapCtx.fillStyle = '#007aff';
     mapCtx.beginPath();
-    mapCtx.moveTo(12, 0);
-    mapCtx.lineTo(-6, -8);
-    mapCtx.lineTo(-6, 8);
+    mapCtx.moveTo(0, -12);   // tip points up (forward)
+    mapCtx.lineTo(-8, 6);    // bottom left
+    mapCtx.lineTo(8, 6);     // bottom right
     mapCtx.closePath();
     mapCtx.fill();
     mapCtx.strokeStyle = '#fff';
@@ -778,13 +778,13 @@ function initJoys() {
     joys = { j1: mkJoy('jz1'), j2: mkJoy('jz2'), j3: mkJoy('jz3') };
 }
 
-// Velocity
+// Velocity - faster response for manual control
 let tL=0, tA=0, cL=0, cA=0, lp=null, keys={};
-function send(l, a) { tL = l; tA = a; if(!lp) lp = setInterval(pub, 50); }
+function send(l, a) { tL = l; tA = a; if(!lp) lp = setInterval(pub, 30); }  // 30ms = 33Hz
 function pub() {
     if(!cmdVel || !conn) return;
-    cL += (tL - cL) * 0.3;
-    cA += (tA - cA) * 0.3;
+    cL += (tL - cL) * 0.5;  // faster smoothing
+    cA += (tA - cA) * 0.5;
     if(Math.abs(cL) < 0.01) cL = 0;
     if(Math.abs(cA) < 0.01) cA = 0;
     cmdVel.publish(new ROSLIB.Message({linear:{x:cL,y:0,z:0}, angular:{x:0,y:0,z:cA}}));
