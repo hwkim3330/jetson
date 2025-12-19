@@ -152,4 +152,12 @@ def generate_launch_description():
             }],
             output='screen',
         ),
+
+        # Mode Controller - handles SLAM, Nav, AI modes
+        Node(
+            package='robot_ai',
+            executable='mode_controller.py',
+            name='mode_controller',
+            output='screen',
+        ),
     ])
