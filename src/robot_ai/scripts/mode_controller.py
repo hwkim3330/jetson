@@ -94,6 +94,13 @@ class ModeController(Node):
             String, '/robot/save_map', self.save_map_callback, 10
         )
 
+        self.load_map_sub = self.create_subscription(
+            String, '/robot/load_map', self.load_map_callback, 10
+        )
+
+        # Track current loaded map slot
+        self.current_map_slot = 'default'
+
         self.example_sub = self.create_subscription(
             String, '/robot/example', self.example_callback, 10
         )
@@ -236,26 +243,131 @@ class ModeController(Node):
             self.get_logger().error(f'Failed to start auto explore: {e}')
 
     def save_map_callback(self, msg):
-        """Handle map save request"""
-        if msg.data.lower() == 'save':
-            self.get_logger().info('Saving map...')
-            map_dir = '/home/nvidia/ros2_ws/maps'
-            map_path = f'{map_dir}/map'  # Always save as map.yaml for Nav2
+        """Handle map save request - supports slot-based saving
 
-            # Create maps directory if not exists
-            os.makedirs(map_dir, exist_ok=True)
+        Message formats:
+        - 'save' or 'save:default' -> save to /maps/map.yaml (for Nav2)
+        - 'save:0' to 'save:9' -> save to /maps/slot_0/ to /maps/slot_9/
+        """
+        data = msg.data.lower().strip()
 
-            # Run map saver
+        if not data.startswith('save'):
+            return
+
+        # Parse slot number
+        parts = data.split(':')
+        slot = parts[1] if len(parts) > 1 else 'default'
+
+        map_base_dir = '/home/nvidia/ros2_ws/maps'
+
+        if slot == 'default' or slot == 'save':
+            # Default save location for Nav2
+            map_dir = map_base_dir
+            map_path = f'{map_dir}/map'
+        else:
+            # Slot-based save
             try:
-                subprocess.run([
-                    'ros2', 'run', 'nav2_map_server', 'map_saver_cli',
-                    '-f', map_path, '--ros-args', '-p', 'save_map_timeout:=10.0'
-                ], timeout=15)
+                slot_num = int(slot)
+                if slot_num < 0 or slot_num > 9:
+                    self.get_logger().error(f'Invalid slot number: {slot_num}')
+                    return
+                map_dir = f'{map_base_dir}/slot_{slot_num}'
+                map_path = f'{map_dir}/map'
+            except ValueError:
+                self.get_logger().error(f'Invalid slot: {slot}')
+                return
+
+        self.get_logger().info(f'Saving map to {map_path}...')
+
+        # Create directory if not exists
+        os.makedirs(map_dir, exist_ok=True)
+
+        # Run map saver
+        try:
+            result = subprocess.run([
+                'ros2', 'run', 'nav2_map_server', 'map_saver_cli',
+                '-f', map_path, '--ros-args', '-p', 'save_map_timeout:=10.0'
+            ], timeout=15, capture_output=True, text=True)
+
+            if result.returncode == 0:
                 self.get_logger().info(f'Map saved to {map_path}.yaml')
-            except subprocess.TimeoutExpired:
-                self.get_logger().error('Map save timed out')
-            except Exception as e:
-                self.get_logger().error(f'Map save failed: {e}')
+                # Also copy to default location for Nav2 if saving to slot
+                if slot != 'default' and slot != 'save':
+                    import shutil
+                    shutil.copy(f'{map_path}.yaml', f'{map_base_dir}/map.yaml')
+                    shutil.copy(f'{map_path}.pgm', f'{map_base_dir}/map.pgm')
+                    self.get_logger().info(f'Also copied to {map_base_dir}/map.yaml for Nav2')
+            else:
+                self.get_logger().error(f'Map save failed: {result.stderr}')
+        except subprocess.TimeoutExpired:
+            self.get_logger().error('Map save timed out')
+        except Exception as e:
+            self.get_logger().error(f'Map save failed: {e}')
+
+    def load_map_callback(self, msg):
+        """Handle map load request - for loading saved maps into Nav2
+
+        Message formats:
+        - 'load' or 'load:default' -> load from /maps/map.yaml
+        - 'load:0' to 'load:9' -> load from /maps/slot_0/ to /maps/slot_9/
+        - 'list' -> list available map slots (publishes to /robot/map_slots)
+        """
+        data = msg.data.lower().strip()
+
+        map_base_dir = '/home/nvidia/ros2_ws/maps'
+
+        if data == 'list':
+            # List available map slots
+            slots = []
+            # Check default
+            if os.path.exists(f'{map_base_dir}/map.yaml'):
+                slots.append('default')
+            # Check slots 0-9
+            for i in range(10):
+                if os.path.exists(f'{map_base_dir}/slot_{i}/map.yaml'):
+                    slots.append(str(i))
+            self.get_logger().info(f'Available map slots: {slots}')
+            # Publish slot list
+            slot_msg = String()
+            slot_msg.data = json.dumps({'slots': slots, 'current': self.current_map_slot})
+            self.status_pub.publish(slot_msg)
+            return
+
+        if not data.startswith('load'):
+            return
+
+        # Parse slot number
+        parts = data.split(':')
+        slot = parts[1] if len(parts) > 1 else 'default'
+
+        if slot == 'default' or slot == 'load':
+            map_path = f'{map_base_dir}/map.yaml'
+        else:
+            try:
+                slot_num = int(slot)
+                if slot_num < 0 or slot_num > 9:
+                    self.get_logger().error(f'Invalid slot number: {slot_num}')
+                    return
+                map_path = f'{map_base_dir}/slot_{slot_num}/map.yaml'
+            except ValueError:
+                self.get_logger().error(f'Invalid slot: {slot}')
+                return
+
+        # Check if file exists
+        if not os.path.exists(map_path):
+            self.get_logger().error(f'Map not found: {map_path}')
+            return
+
+        self.get_logger().info(f'Loading map from {map_path}')
+        self.current_map_slot = slot
+
+        # Copy to default location for Nav2 to use
+        if slot != 'default' and slot != 'load':
+            import shutil
+            slot_dir = f'{map_base_dir}/slot_{slot}'
+            shutil.copy(f'{slot_dir}/map.yaml', f'{map_base_dir}/map.yaml')
+            shutil.copy(f'{slot_dir}/map.pgm', f'{map_base_dir}/map.pgm')
+            self.get_logger().info(f'Map slot {slot} copied to default location')
 
     def ai_mode_callback(self, msg):
         """Handle AI mode change requests"""

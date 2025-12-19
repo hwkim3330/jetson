@@ -441,6 +441,7 @@ function setup() {
     aiPub = new ROSLIB.Topic({ros, name:'/robot/ai_mode', messageType:'std_msgs/String'});
     modePub = new ROSLIB.Topic({ros, name:'/robot/mode', messageType:'std_msgs/String'});
     savePub = new ROSLIB.Topic({ros, name:'/robot/save_map', messageType:'std_msgs/String'});
+    loadMapPub = new ROSLIB.Topic({ros, name:'/robot/load_map', messageType:'std_msgs/String'});
     goalPub = new ROSLIB.Topic({ros, name:'/goal_pose', messageType:'geometry_msgs/PoseStamped'});
     initPosePub = new ROSLIB.Topic({ros, name:'/initialpose', messageType:'geometry_msgs/PoseWithCovarianceStamped'});
 
@@ -518,17 +519,18 @@ function onLocalPath(msg) {
 function drawMap() {
     if(!mapCtx || !mapCanvas.width) return;
     const cw = mapCanvas.width, ch = mapCanvas.height;
-    const cx = cw / 2, cy = ch / 2;
+    const cx = cw / 2 + mapOffset.x, cy = ch / 2 + mapOffset.y;
+    const zoomedPPM = PPM * mapZoom;
 
     // Clear
     mapCtx.fillStyle = '#2c2c2e';
     mapCtx.fillRect(0, 0, cw, ch);
 
-    // World to canvas helper
+    // World to canvas helper (with pan/zoom)
     function w2c(wx, wy) {
         return {
-            x: cx + (wx - robotPose.x) * PPM,
-            y: cy - (wy - robotPose.y) * PPM
+            x: cx + (wx - robotPose.x) * zoomedPPM,
+            y: cy - (wy - robotPose.y) * zoomedPPM
         };
     }
 
@@ -540,8 +542,8 @@ function drawMap() {
         const mw = mapInfo.width;
         const mh = mapInfo.height;
 
-        // Scale: pixels per cell
-        const scale = res * PPM;
+        // Scale: pixels per cell (with zoom)
+        const scale = res * zoomedPPM;
 
         // Map origin in canvas coords
         const mapOrigin = w2c(ox, oy + mh * res);
@@ -778,17 +780,13 @@ function initJoys() {
     joys = { j1: mkJoy('jz1'), j2: mkJoy('jz2'), j3: mkJoy('jz3') };
 }
 
-// Velocity - faster response for manual control
-let tL=0, tA=0, cL=0, cA=0, lp=null, keys={};
-function send(l, a) { tL = l; tA = a; if(!lp) lp = setInterval(pub, 30); }  // 30ms = 33Hz
+// Velocity - direct control, no smoothing
+let tL=0, tA=0, lp=null, keys={};
+function send(l, a) { tL = l; tA = a; if(!lp) lp = setInterval(pub, 50); }
 function pub() {
     if(!cmdVel || !conn) return;
-    cL += (tL - cL) * 0.5;  // faster smoothing
-    cA += (tA - cA) * 0.5;
-    if(Math.abs(cL) < 0.01) cL = 0;
-    if(Math.abs(cA) < 0.01) cA = 0;
-    cmdVel.publish(new ROSLIB.Message({linear:{x:cL,y:0,z:0}, angular:{x:0,y:0,z:cA}}));
-    if(!tL && !tA && !cL && !cA) { clearInterval(lp); lp = null; }
+    cmdVel.publish(new ROSLIB.Message({linear:{x:tL,y:0,z:0}, angular:{x:0,y:0,z:tA}}));
+    if(!tL && !tA) { clearInterval(lp); lp = null; }
 }
 function stop() { tL = tA = 0; }
 
@@ -880,7 +878,7 @@ function stopExploreLoop() {
 }
 
 function findFrontiers() {
-    // Find frontier cells (free cells adjacent to unknown cells)
+    // Find frontier cells with information gain scoring
     if(!mapData || !mapInfo) return [];
 
     const w = mapInfo.width;
@@ -890,32 +888,32 @@ function findFrontiers() {
     const oy = mapInfo.origin.position.y;
 
     const frontiers = [];
-    const checked = new Set();
 
-    // Sample every 4th cell for speed
-    for(let y = 2; y < h - 2; y += 4) {
-        for(let x = 2; x < w - 2; x += 4) {
+    // Sample every 3rd cell for better coverage
+    for(let y = 3; y < h - 3; y += 3) {
+        for(let x = 3; x < w - 3; x += 3) {
             const idx = y * w + x;
             if(mapData[idx] !== 0) continue; // Not free
 
-            // Check if adjacent to unknown
-            let hasUnknown = false;
-            for(let dy = -2; dy <= 2; dy++) {
-                for(let dx = -2; dx <= 2; dx++) {
+            // Count unknown and obstacle cells nearby
+            let unknownCount = 0;
+            let obstacleCount = 0;
+            for(let dy = -3; dy <= 3; dy++) {
+                for(let dx = -3; dx <= 3; dx++) {
                     const ni = (y + dy) * w + (x + dx);
-                    if(ni >= 0 && ni < mapData.length && mapData[ni] === -1) {
-                        hasUnknown = true;
-                        break;
+                    if(ni >= 0 && ni < mapData.length) {
+                        if(mapData[ni] === -1) unknownCount++;
+                        else if(mapData[ni] > 50) obstacleCount++;
                     }
                 }
-                if(hasUnknown) break;
             }
 
-            if(hasUnknown) {
-                // Convert to world coords
+            // Only add if adjacent to unknown and not too many obstacles
+            if(unknownCount > 3 && obstacleCount < 10) {
                 const wx = ox + x * res;
                 const wy = oy + y * res;
-                frontiers.push({x: wx, y: wy});
+                // Score based on information gain (more unknown = better)
+                frontiers.push({x: wx, y: wy, score: unknownCount});
             }
         }
     }
@@ -923,147 +921,181 @@ function findFrontiers() {
     return frontiers;
 }
 
-function findNearestFrontier() {
+function findBestFrontier() {
+    // Find best frontier using weighted scoring (distance + info gain)
     const frontiers = findFrontiers();
     if(frontiers.length === 0) return null;
 
-    let nearest = null;
-    let minDist = Infinity;
+    let best = null;
+    let bestScore = -Infinity;
 
     for(const f of frontiers) {
         const dx = f.x - robotPose.x;
         const dy = f.y - robotPose.y;
         const dist = Math.sqrt(dx*dx + dy*dy);
 
-        // Skip too close (already explored) or too far
-        if(dist < 0.5 || dist > 10) continue;
+        // Skip too close or too far
+        if(dist < 0.4 || dist > 8) continue;
 
-        if(dist < minDist) {
-            minDist = dist;
-            nearest = f;
+        // Check if path is roughly clear (robot facing direction)
+        const angle = Math.atan2(dy, dx);
+        let angleDiff = angle - robotPose.theta;
+        while(angleDiff > Math.PI) angleDiff -= 2*Math.PI;
+        while(angleDiff < -Math.PI) angleDiff += 2*Math.PI;
+
+        // Prefer frontiers we're roughly facing (less turning needed)
+        const facingBonus = Math.abs(angleDiff) < 0.5 ? 10 : (Math.abs(angleDiff) < 1.0 ? 5 : 0);
+
+        // Score = info_gain / distance + facing_bonus
+        // Closer frontiers with more unknown area are preferred
+        const score = (f.score / (dist + 0.5)) + facingBonus;
+
+        if(score > bestScore) {
+            bestScore = score;
+            best = f;
         }
     }
 
-    return nearest;
+    return best;
 }
 
-// Stuck detection
+function findNearestFrontier() {
+    // Wrapper for compatibility - now uses improved scoring
+    return findBestFrontier();
+}
+
+// Stuck detection with smarter recovery
 let lastPos = {x: 0, y: 0};
 let stuckTime = 0;
 let escapeMode = false;
 let escapeStart = 0;
+let escapeCount = 0;  // Track repeated escapes
+let escapeDir = 1;    // Direction to turn during escape
 
 function exploreLoop() {
     if(!autoSlam || !conn) return;
 
     const now = Date.now();
 
-    // Stuck detection - if robot hasn't moved for 3 seconds
+    // Check obstacles first
+    const front = getMinDist(-30, 30);
+    const frontLeft = getMinDist(30, 60);
+    const frontRight = getMinDist(-60, -30);
+    const left = getMinDist(60, 120);
+    const right = getMinDist(-120, -60);
+    const backLeft = getMinDist(120, 160);
+    const backRight = getMinDist(-160, -120);
+    const back = Math.min(backLeft, backRight);
+
+    const STOP_DIST = 0.25;
+    const SLOW_DIST = 0.35;
+
+    // Stuck detection - if robot hasn't moved for 2.5 seconds
     const moved = Math.sqrt(Math.pow(robotPose.x - lastPos.x, 2) + Math.pow(robotPose.y - lastPos.y, 2));
-    if(moved > 0.1) {
+    if(moved > 0.08) {
         lastPos = {x: robotPose.x, y: robotPose.y};
         stuckTime = now;
+        if(!escapeMode) escapeCount = Math.max(0, escapeCount - 1);
         escapeMode = false;
-    } else if(now - stuckTime > 3000 && !escapeMode) {
+    } else if(now - stuckTime > 2500 && !escapeMode) {
         escapeMode = true;
         escapeStart = now;
-        document.getElementById('mstat').textContent = 'Stuck! Escaping...';
+        escapeCount++;
+        // Alternate escape direction, with preference for more open side
+        escapeDir = left > right ? 1 : -1;
+        if(escapeCount > 2) escapeDir = -escapeDir;  // Try opposite if stuck repeatedly
+        document.getElementById('mstat').textContent = `Stuck! Escape #${escapeCount}`;
     }
-
-    // Find new frontier every 3 seconds or when reached goal
-    const needNewGoal = !frontierGoal ||
-        (now - lastFrontierSearch > 3000) ||
-        (frontierGoal && Math.sqrt(Math.pow(frontierGoal.x - robotPose.x, 2) + Math.pow(frontierGoal.y - robotPose.y, 2)) < 0.3);
-
-    if(needNewGoal && !escapeMode) {
-        lastFrontierSearch = now;
-        const newFrontier = findNearestFrontier();
-        if(newFrontier) {
-            frontierGoal = newFrontier;
-            document.getElementById('mstat').textContent = `Exploring (${frontierGoal.x.toFixed(1)}, ${frontierGoal.y.toFixed(1)})`;
-        } else {
-            document.getElementById('mstat').textContent = 'Exploration complete!';
-            frontierGoal = null;
-        }
-    }
-
-    // Check obstacles using getMinDist (degrees: 0=front, +left, -right)
-    const front = getMinDist(-30, 30);      // Front 60 degrees
-    const frontLeft = getMinDist(30, 60);   // Front-left
-    const frontRight = getMinDist(-60, -30); // Front-right
-    const left = getMinDist(60, 120);       // Left side
-    const right = getMinDist(-120, -60);    // Right side
-    const back = getMinDist(150, 180) < getMinDist(-180, -150) ? getMinDist(150, 180) : getMinDist(-180, -150);
 
     let lin = 0, ang = 0;
-    const STOP_DIST = 0.25;   // Emergency stop distance
-    const SLOW_DIST = 0.35;   // Slow down distance
 
-    // Escape mode - back up and turn around
+    // Escape mode - smart recovery
     if(escapeMode) {
         const escapeElapsed = now - escapeStart;
+        const escapeTime = escapeCount > 3 ? 4000 : 3000;  // Longer escape if stuck often
+
         if(escapeElapsed < 1500) {
-            // Back up for 1.5 seconds
-            lin = back > 0.2 ? -0.15 : 0;
-            ang = 0;
-        } else if(escapeElapsed < 3000) {
-            // Turn around for 1.5 seconds
-            lin = 0;
-            ang = 0.8;
+            // Phase 1: Back up if possible
+            if(back > 0.25) {
+                lin = -0.15;
+                ang = escapeDir * 0.3;  // Slight turn while backing
+            } else {
+                // Can't back up, just turn
+                ang = escapeDir * 0.8;
+            }
+        } else if(escapeElapsed < escapeTime) {
+            // Phase 2: Turn toward open space
+            lin = 0.03;
+            ang = escapeDir * 0.7;
         } else {
             // Done escaping
             escapeMode = false;
             stuckTime = now;
             frontierGoal = null;  // Find new goal
+            lastFrontierSearch = 0;  // Force immediate search
         }
         send(lin, ang);
         return;
     }
 
-    // Dead end detection - all sides blocked
+    // Dead end detection - all forward paths blocked
     const deadEnd = front < SLOW_DIST && frontLeft < SLOW_DIST && frontRight < SLOW_DIST;
     if(deadEnd) {
-        // Back up and turn
         lin = back > 0.2 ? -0.12 : 0;
         ang = left > right ? 0.7 : -0.7;
         send(lin, ang);
         return;
     }
 
+    // Find new frontier when needed
+    const needNewGoal = !frontierGoal ||
+        (now - lastFrontierSearch > 4000) ||
+        (frontierGoal && Math.sqrt(Math.pow(frontierGoal.x - robotPose.x, 2) + Math.pow(frontierGoal.y - robotPose.y, 2)) < 0.35);
+
+    if(needNewGoal) {
+        lastFrontierSearch = now;
+        const newFrontier = findNearestFrontier();
+        if(newFrontier) {
+            frontierGoal = newFrontier;
+            const score = newFrontier.score || 0;
+            document.getElementById('mstat').textContent = `Exploring (${frontierGoal.x.toFixed(1)}, ${frontierGoal.y.toFixed(1)}) [${score}]`;
+        } else {
+            document.getElementById('mstat').textContent = 'Exploration complete!';
+            frontierGoal = null;
+        }
+    }
+
     if(frontierGoal) {
         const dx = frontierGoal.x - robotPose.x;
         const dy = frontierGoal.y - robotPose.y;
+        const dist = Math.sqrt(dx*dx + dy*dy);
         const goalAngle = Math.atan2(dy, dx);
         let angleDiff = goalAngle - robotPose.theta;
         while(angleDiff > Math.PI) angleDiff -= 2*Math.PI;
         while(angleDiff < -Math.PI) angleDiff += 2*Math.PI;
 
         if(front < STOP_DIST) {
-            // Emergency: obstacle too close - back up and rotate
-            lin = back > 0.2 ? -0.1 : 0;
+            // Emergency: back up and turn away
+            lin = back > 0.2 ? -0.12 : 0;
             ang = left > right ? 0.8 : -0.8;
         } else if(front < SLOW_DIST || frontLeft < STOP_DIST || frontRight < STOP_DIST) {
-            // Obstacle nearby - turn to avoid
-            if(frontLeft < frontRight) {
-                ang = -0.6;  // Turn right
-            } else {
-                ang = 0.6;   // Turn left
-            }
-            lin = 0.05;
+            // Navigate around obstacle
+            ang = frontLeft < frontRight ? -0.6 : 0.6;
+            lin = 0.06;
         } else if(Math.abs(angleDiff) > 0.4) {
             // Rotate toward goal
             ang = angleDiff > 0 ? 0.5 : -0.5;
             lin = 0.08;
         } else {
             // Go forward toward goal
-            lin = 0.15;
-            ang = angleDiff * 0.6;
-            // Slight correction for side obstacles
-            if(frontLeft < SLOW_DIST) ang -= 0.15;
-            if(frontRight < SLOW_DIST) ang += 0.15;
+            lin = Math.min(0.18, dist * 0.3 + 0.1);
+            ang = angleDiff * 0.7;
+            // Wall following behavior
+            if(frontLeft < SLOW_DIST) ang -= 0.2;
+            if(frontRight < SLOW_DIST) ang += 0.2;
         }
     } else {
-        // No goal - random wander with obstacle avoidance
+        // No goal - wall-following exploration
         if(front < STOP_DIST) {
             lin = -0.05;
             ang = left > right ? 0.8 : -0.8;
@@ -1072,7 +1104,9 @@ function exploreLoop() {
             lin = 0.05;
         } else {
             lin = 0.12;
-            ang = 0;
+            // Slight wall following preference
+            if(right < 1.0 && right > 0.3) ang = -0.1;
+            else if(left < 1.0 && left > 0.3) ang = 0.1;
         }
     }
 
@@ -1098,12 +1132,14 @@ document.onkeyup = e => {
     if('wasdWASD'.includes(e.key)) { keys[e.key] = false; updateFromKeys(); }
 };
 
-// Map Slots - localStorage based map save/load
+// Map Slots - ROS file-based + localStorage hybrid
 let currentSlot = null;
 const SLOT_KEY = 'robot_map_slot_';
+let loadMapPub = null;
+let rosSlots = [];  // Slots that exist on ROS filesystem
 
 function initMapSlots() {
-    // Check which slots have saved maps (0-9)
+    // Check localStorage slots (0-9)
     for(let i = 0; i <= 9; i++) {
         const saved = localStorage.getItem(SLOT_KEY + i);
         const btn = document.querySelector(`.slot-btn[data-slot="${i}"]`);
@@ -1111,60 +1147,85 @@ function initMapSlots() {
             btn.classList.add('has-map');
         }
     }
+    // Request ROS slot list (will update rosSlots when response received)
+    if(loadMapPub) {
+        loadMapPub.publish(new ROSLIB.Message({data: 'list'}));
+    }
 }
 
 function saveMapToSlot(slot) {
-    if(!mapData || !mapInfo) {
-        document.getElementById('mstat').textContent = 'No map to save!';
-        return false;
+    // Save to ROS filesystem via mode_controller
+    if(savePub) {
+        document.getElementById('mstat').textContent = `Saving to slot ${slot}...`;
+        savePub.publish(new ROSLIB.Message({data: `save:${slot}`}));
     }
 
-    const saveData = {
-        info: mapInfo,
-        data: Array.from(mapData),  // Convert to array for JSON
-        robotPose: robotPose,
-        timestamp: Date.now()
-    };
-
-    try {
-        localStorage.setItem(SLOT_KEY + slot, JSON.stringify(saveData));
-        const btn = document.querySelector(`.slot-btn[data-slot="${slot}"]`);
-        if(btn) btn.classList.add('has-map');
-        document.getElementById('mstat').textContent = `Map saved to slot ${slot}`;
-        return true;
-    } catch(e) {
-        document.getElementById('mstat').textContent = 'Save failed (storage full?)';
-        return false;
+    // Also save snapshot to localStorage (lightweight metadata)
+    if(mapData && mapInfo) {
+        const saveData = {
+            info: {
+                width: mapInfo.width,
+                height: mapInfo.height,
+                resolution: mapInfo.resolution,
+                origin: mapInfo.origin
+            },
+            data: Array.from(mapData),
+            robotPose: robotPose,
+            timestamp: Date.now()
+        };
+        try {
+            localStorage.setItem(SLOT_KEY + slot, JSON.stringify(saveData));
+        } catch(e) {
+            console.log('localStorage save failed (may exceed quota)');
+        }
     }
+
+    const btn = document.querySelector(`.slot-btn[data-slot="${slot}"]`);
+    if(btn) btn.classList.add('has-map');
+
+    setTimeout(() => {
+        document.getElementById('mstat').textContent = `Slot ${slot} saved`;
+    }, 1500);
+    return true;
 }
 
 function loadMapFromSlot(slot) {
+    // First try localStorage (faster, has recent data)
     const saved = localStorage.getItem(SLOT_KEY + slot);
-    if(!saved) {
-        document.getElementById('mstat').textContent = `Slot ${slot} is empty`;
-        return false;
+    if(saved) {
+        try {
+            const data = JSON.parse(saved);
+            mapInfo = data.info;
+            mapData = data.data;
+            mapImageDirty = true;
+            updateMapImage();
+
+            document.querySelectorAll('.slot-btn').forEach(b => b.classList.remove('active'));
+            const btn = document.querySelector(`.slot-btn[data-slot="${slot}"]`);
+            if(btn) btn.classList.add('active');
+            currentSlot = slot;
+
+            document.getElementById('mstat').textContent = `Loaded slot ${slot}`;
+
+            // Also tell ROS to load this slot for Nav2
+            if(loadMapPub) {
+                loadMapPub.publish(new ROSLIB.Message({data: `load:${slot}`}));
+            }
+            return true;
+        } catch(e) {
+            console.log('localStorage load failed:', e);
+        }
     }
 
-    try {
-        const data = JSON.parse(saved);
-        mapInfo = data.info;
-        mapData = data.data;
-        mapImageDirty = true;
-        updateMapImage();
-
-        // Update slot UI
-        document.querySelectorAll('.slot-btn').forEach(b => b.classList.remove('active'));
-        const btn = document.querySelector(`.slot-btn[data-slot="${slot}"]`);
-        if(btn) btn.classList.add('active');
+    // Fallback: just tell ROS to load (for Nav2)
+    if(loadMapPub) {
+        loadMapPub.publish(new ROSLIB.Message({data: `load:${slot}`}));
+        document.getElementById('mstat').textContent = `Loading slot ${slot} from ROS...`;
         currentSlot = slot;
-
-        const date = new Date(data.timestamp);
-        document.getElementById('mstat').textContent = `Loaded slot ${slot}`;
-        return true;
-    } catch(e) {
-        document.getElementById('mstat').textContent = 'Load failed';
-        return false;
+    } else {
+        document.getElementById('mstat').textContent = `Slot ${slot} empty`;
     }
+    return false;
 }
 
 function deleteMapSlot(slot) {
@@ -1177,6 +1238,70 @@ function deleteMapSlot(slot) {
     if(currentSlot === slot) currentSlot = null;
     document.getElementById('mstat').textContent = `Slot ${slot} cleared`;
 }
+
+// Pan/Zoom state for map
+let mapOffset = {x: 0, y: 0};
+let mapZoom = 1.0;
+let isPanning = false;
+let panStart = {x: 0, y: 0};
+let lastPinchDist = 0;
+
+// Map touch handlers for pan/zoom
+mapCanvas?.addEventListener('touchstart', function(e) {
+    if(mapMode === 'goal') return;  // Goal mode takes precedence
+    if(e.touches.length === 1) {
+        isPanning = true;
+        panStart = {x: e.touches[0].clientX - mapOffset.x, y: e.touches[0].clientY - mapOffset.y};
+    } else if(e.touches.length === 2) {
+        isPanning = false;
+        const dx = e.touches[1].clientX - e.touches[0].clientX;
+        const dy = e.touches[1].clientY - e.touches[0].clientY;
+        lastPinchDist = Math.sqrt(dx*dx + dy*dy);
+    }
+}, {passive: true});
+
+mapCanvas?.addEventListener('touchmove', function(e) {
+    if(mapMode === 'goal') return;
+    if(e.touches.length === 1 && isPanning) {
+        mapOffset.x = e.touches[0].clientX - panStart.x;
+        mapOffset.y = e.touches[0].clientY - panStart.y;
+    } else if(e.touches.length === 2) {
+        const dx = e.touches[1].clientX - e.touches[0].clientX;
+        const dy = e.touches[1].clientY - e.touches[0].clientY;
+        const dist = Math.sqrt(dx*dx + dy*dy);
+        if(lastPinchDist > 0) {
+            const scale = dist / lastPinchDist;
+            mapZoom = Math.max(0.5, Math.min(4.0, mapZoom * scale));
+        }
+        lastPinchDist = dist;
+    }
+}, {passive: true});
+
+mapCanvas?.addEventListener('touchend', function(e) {
+    if(e.touches.length === 0) {
+        isPanning = false;
+        lastPinchDist = 0;
+    }
+}, {passive: true});
+
+// Mouse wheel zoom
+mapCanvas?.addEventListener('wheel', function(e) {
+    e.preventDefault();
+    const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
+    mapZoom = Math.max(0.5, Math.min(4.0, mapZoom * zoomFactor));
+}, {passive: false});
+
+// Double-tap to reset view
+let lastTapTime = 0;
+mapCanvas?.addEventListener('touchend', function(e) {
+    if(mapMode === 'goal') return;
+    const now = Date.now();
+    if(now - lastTapTime < 300 && e.touches.length === 0) {
+        mapOffset = {x: 0, y: 0};
+        mapZoom = 1.0;
+    }
+    lastTapTime = now;
+});
 
 // Slot button handlers - tap to load, long press to save
 document.querySelectorAll('.slot-btn').forEach(btn => {
@@ -1196,13 +1321,7 @@ document.querySelectorAll('.slot-btn').forEach(btn => {
 
         pressTimer = setTimeout(() => {
             longPressed = true;
-            // Long press - save or delete
-            if(btn.classList.contains('has-map')) {
-                // Already has map - offer to overwrite
-                saveMapToSlot(slot);
-            } else {
-                saveMapToSlot(slot);
-            }
+            saveMapToSlot(slot);
         }, 600);
     }
 
