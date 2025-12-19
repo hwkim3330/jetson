@@ -14,14 +14,14 @@
         html, body { overflow: hidden; position: fixed; width: 100%; height: 100%; font-family: -apple-system, sans-serif; background: #f2f2f7; }
         .app { height: 100%; display: flex; flex-direction: column; }
 
-        .header { display: flex; align-items: center; padding: 8px 12px; background: #fff; border-bottom: 1px solid #d1d1d6; flex-shrink: 0; }
-        .logo { display: flex; align-items: center; gap: 6px; }
+        .header { display: flex; align-items: center; justify-content: center; padding: 8px 12px; background: #fff; border-bottom: 1px solid #d1d1d6; flex-shrink: 0; position: relative; }
+        .logo { position: absolute; left: 12px; display: flex; align-items: center; gap: 6px; }
         .logo img { height: 20px; }
         .logo span { font-size: 15px; font-weight: 600; color: #1c1c1e; }
-        .tabs { flex: 1; display: flex; justify-content: center; gap: 4px; }
+        .tabs { display: flex; justify-content: center; gap: 4px; }
         .tab { padding: 6px 20px; background: #e5e5ea; border: none; border-radius: 8px; font-size: 13px; font-weight: 500; color: #3a3a3c; cursor: pointer; }
         .tab.active { background: #007aff; color: #fff; }
-        .status { font-size: 11px; color: #8e8e93; display: flex; align-items: center; gap: 4px; }
+        .status { position: absolute; right: 12px; font-size: 11px; color: #8e8e93; display: flex; align-items: center; gap: 4px; }
         .dot { width: 8px; height: 8px; border-radius: 50%; background: #ff3b30; }
         .dot.on { background: #34c759; }
 
@@ -850,8 +850,10 @@ function drawBoxes() {
     });
 }
 
-// Joysticks
+// Joysticks - fixed interval like navLoop (not event-driven)
 let joys = {};
+let joyLin = 0, joyAng = 0, joyActive = false;
+
 function mkJoy(id) {
     const z = document.getElementById(id);
     if(!z) return null;
@@ -862,12 +864,21 @@ function mkJoy(id) {
         color: '#8e8e93',
         size: 110
     }).on('move', (e, d) => {
-        // Fixed speed, direction only (no force-based speed control)
-        const a = d.angle.radian;
-        const lin = Math.sin(a) * ML;   // up=forward, down=backward
-        const ang = -Math.cos(a) * MA;  // left=turn left, right=turn right
-        send(lin, ang);
-    }).on('end', stop);
+        // Just update values, don't send (interval handles sending)
+        joyActive = true;
+        if(d.force < 0.15) {
+            joyLin = 0;
+            joyAng = 0;
+        } else {
+            const a = d.angle.radian;
+            joyLin = Math.sin(a) * ML;
+            joyAng = -Math.cos(a) * MA;
+        }
+    }).on('end', () => {
+        joyActive = false;
+        joyLin = 0;
+        joyAng = 0;
+    });
 }
 
 function initJoys() {
@@ -875,17 +886,30 @@ function initJoys() {
     joys = { j1: mkJoy('jz1'), j2: mkJoy('jz2'), j3: mkJoy('jz3') };
 }
 
-// Velocity control - 10Hz direct publish (no smoothing, like navLoop)
+// Velocity control - fixed 10Hz interval (same as navLoop)
 let tL=0, tA=0;
-let lp=null, keys={};
+let velInterval = null, keys={};
 
-function send(l, a) { tL = l; tA = a; if(!lp) lp = setInterval(pub, 100); }
-function pub() {
-    if(!cmdVel || !conn) return;
-    cmdVel.publish(new ROSLIB.Message({linear:{x:tL,y:0,z:0}, angular:{x:0,y:0,z:tA}}));
-    if(!tL && !tA) { clearInterval(lp); lp = null; }
+function startVelLoop() {
+    if(!velInterval) velInterval = setInterval(velLoop, 100);  // 10Hz fixed
 }
-function stop() { tL = tA = 0; }
+let lastCmdTime = 0;
+function velLoop() {
+    if(!cmdVel || !conn) return;
+    const lin = joyActive ? joyLin : tL;
+    const ang = joyActive ? joyAng : tA;
+    const now = Date.now();
+    // Always send when active, or send stop for 500ms after release
+    if(lin || ang || joyActive || (now - lastCmdTime < 500)) {
+        cmdVel.publish(new ROSLIB.Message({linear:{x:lin,y:0,z:0}, angular:{x:0,y:0,z:ang}}));
+        if(lin || ang) lastCmdTime = now;
+    }
+}
+function send(l, a) { tL = l; tA = a; startVelLoop(); }
+function stop() { tL = tA = 0; joyLin = joyAng = 0; joyActive = false; }
+
+// Start velocity loop on connection
+setTimeout(startVelLoop, 2000);
 
 // JS Navigation Loop
 function startNavLoop() {

@@ -642,9 +642,7 @@ class ModeController(Node):
         """Periodic processing based on mode"""
         if self.current_mode == 'obstacle' and self.has_scan:
             self.obstacle_avoidance()
-        elif self.current_mode == 'manual' and not self.example_running:
-            # Pass through raw commands
-            self.cmd_vel_pub.publish(self.raw_twist)
+        # Manual mode: don't publish - let web joystick control directly via rosbridge
 
     def obstacle_avoidance(self):
         """Simple obstacle avoidance"""
