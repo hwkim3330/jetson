@@ -1,166 +1,385 @@
-# SDV - Self-Driving Vehicle Platform
+<div align="center">
 
-NVIDIA Jetson Orin Nano Super 기반 자율주행 로봇
+# SDV - Software Defined Vehicle
 
-## 시스템 구성
+**NVIDIA Jetson Orin Nano 기반 자율주행 로봇 플랫폼**
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│              Web Interface (port 8888)                       │
-│  ┌─────────────────────────────────────────────────────┐    │
-│  │  [Logo] SDV    [Control][Map][AI]        ● Online   │    │
-│  ├─────────────────────────────────────────────────────┤    │
-│  │                                                     │    │
-│  │        Camera View (16:9) or Map View               │    │
-│  │                                                     │    │
-│  ├─────────────┬───────────────────┬───────────────────┤    │
-│  │   LiDAR     │    X / Y / θ      │    Joystick      │    │
-│  │   (scan)    │   Speed Slider    │    Control       │    │
-│  └─────────────┴───────────────────┴───────────────────┘    │
-└─────────────────────────────────────────────────────────────┘
-                          │
-                          ▼
-┌─────────────────────────────────────────────────────────────┐
-│                     ROS2 Humble                              │
-│  ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌──────────┐ │
-│  │ camera_node│ │ rosbridge  │ │ robot_     │ │ mode_    │ │
-│  │   (8080)   │ │   (9090)   │ │  driver    │ │controller│ │
-│  └────────────┘ └────────────┘ └────────────┘ └──────────┘ │
-│  ┌────────────┐ ┌────────────┐ ┌────────────┐              │
-│  │ yolo_      │ │ rf2o_laser │ │ LD19       │              │
-│  │ detector   │ │ _odometry  │ │ LiDAR      │              │
-│  └────────────┘ └────────────┘ └────────────┘              │
-└─────────────────────────────────────────────────────────────┘
-```
+[![ROS2](https://img.shields.io/badge/ROS2-Humble-blue?logo=ros)](https://docs.ros.org/en/humble/)
+[![Jetson](https://img.shields.io/badge/Jetson-Orin_Nano-76B900?logo=nvidia)](https://developer.nvidia.com/embedded/jetson-orin-nano-developer-kit)
+[![TensorRT](https://img.shields.io/badge/TensorRT-10.3-76B900?logo=nvidia)](https://developer.nvidia.com/tensorrt)
+[![Python](https://img.shields.io/badge/Python-3.10-3776AB?logo=python)](https://www.python.org/)
+[![License](https://img.shields.io/badge/License-Apache_2.0-green.svg)](LICENSE)
 
-## 포트 구성
+[Features](#features) • [Installation](#installation) • [Quick Start](#quick-start) • [Documentation](#documentation) • [Architecture](#architecture)
 
-| Port | Service | Description |
-|------|---------|-------------|
-| 8888 | nginx | Web UI |
-| 8080 | camera_node | MJPEG 스트림 |
-| 9090 | rosbridge | WebSocket |
+</div>
 
-## Web UI 탭
+---
 
-### Control 탭
-- 카메라 실시간 영상 (16:9)
-- LiDAR 시각화 (거리별 색상)
-- 조이스틱 제어
-- Odom 값 (X, Y, θ)
-- 속도 조절 슬라이더
+## Overview
 
-### Map 탭
-- ros2djs 지도 뷰어
-- SLAM / Save / Load / Nav / Stop 버튼
-- LiDAR + 조이스틱 제어
+SDV(Software Defined Vehicle)는 NVIDIA Jetson Orin Nano Super를 기반으로 한 자율주행 로봇 플랫폼입니다. 웹 브라우저를 통해 로봇을 제어하고, SLAM/Navigation, AI 객체 인식 등의 기능을 제공합니다.
 
-### AI 탭
-- 카메라 영상 + YOLO 버튼
-- 감지 로그 표시
-- LiDAR + 조이스틱 제어
+### Key Features
 
-## AI 모드
+| Feature | Description |
+|---------|-------------|
+| **Web Control** | 모바일/PC 브라우저에서 실시간 제어 |
+| **SLAM** | Cartographer 기반 실시간 맵 생성 |
+| **Navigation** | Nav2 기반 자율 주행 |
+| **Auto Explore** | LiDAR 기반 자동 맵 탐색 (로봇 청소기 모드) |
+| **AI Detection** | YOLOv8 TensorRT 객체 인식 (147 FPS) |
+| **Camera** | 16:9 실시간 스트리밍 (MJPEG) |
 
-| Mode | 설명 | TensorRT |
-|------|------|----------|
-| **YOLO** | YOLOv8n 객체 감지 | FP16, 147 FPS |
-| **Follower** | 사람 추종 | - |
-| **Patrol** | 경로 순찰 | - |
-| **Lane** | 차선 주행 | - |
+---
 
-### TensorRT YOLOv8n 성능
-- Engine: `yolov8n_fp16.engine` (9MB)
-- Throughput: **147 FPS**
-- Latency: 7.6ms (mean)
-- GPU Compute: 6.8ms
+## Hardware Requirements
 
-## 카메라
+| Component | Specification |
+|-----------|--------------|
+| **Board** | NVIDIA Jetson Orin Nano Super (8GB) |
+| **Camera** | IMX219 CSI Camera |
+| **LiDAR** | LD19 360° LiDAR |
+| **Motor** | Modbus Motor Driver |
+| **Power** | DC 12V |
 
-```
-IMX219 CSI → nvarguscamerasrc → nvjpegenc → CompressedImage
-                                    │
-                                    ├→ ROS2: /camera/image_raw/compressed
-                                    └→ HTTP: http://IP:8080/stream
-```
+---
 
-- 해상도: **640x360** (16:9)
-- FPS: **15**
-- 하드웨어 JPEG 인코딩
+## Installation
 
-## 빠른 시작
+### Prerequisites
 
 ```bash
-# 서비스 상태 확인
-systemctl status robot.service nginx
+# ROS2 Humble 설치 확인
+ros2 --version
 
-# 웹 접속
-http://<IP>:8888
-
-# 로그 확인
-journalctl -u robot.service -f
+# JetPack 6.x with TensorRT 10.x
+dpkg -l | grep tensorrt
 ```
 
-## 수동 실행
+### Clone & Build
 
 ```bash
+# 1. Clone repository
+cd ~
+git clone https://github.com/hwkim3330/jetson_robot.git ros2_ws
+
+# 2. Install dependencies
+cd ~/ros2_ws
+rosdep install --from-paths src --ignore-src -r -y
+
+# 3. Build
 source /opt/ros/humble/setup.bash
-source ~/ros2_ws/install/setup.bash
-export KETI_MODEL=robot
-export LDS_MODEL=LDS-04
+colcon build --symlink-install
 
-ros2 launch robot_bringup robot.launch.py
+# 4. Setup environment
+echo "source ~/ros2_ws/install/setup.bash" >> ~/.bashrc
+echo "export KETI_MODEL=robot" >> ~/.bashrc
+echo "export LDS_MODEL=LDS-04" >> ~/.bashrc
+source ~/.bashrc
 ```
 
-## 패키지 구조
+### Web UI Setup
+
+```bash
+# Install nginx
+sudo apt install nginx -y
+
+# Copy web files
+sudo cp -r ~/ros2_ws/src/robot_web/www/* /var/www/robot/
+
+# Configure nginx (port 8888)
+sudo tee /etc/nginx/sites-available/robot << 'EOF'
+server {
+    listen 8888;
+    root /var/www/robot;
+    index index.html;
+    location / {
+        try_files $uri $uri/ =404;
+    }
+}
+EOF
+
+sudo ln -sf /etc/nginx/sites-available/robot /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl restart nginx
+```
+
+### Auto-Start Service
+
+```bash
+# Create systemd service
+sudo tee /etc/systemd/system/robot.service << 'EOF'
+[Unit]
+Description=SDV Robot Service
+After=network.target
+
+[Service]
+Type=simple
+User=nvidia
+WorkingDirectory=/home/nvidia/ros2_ws
+ExecStart=/home/nvidia/ros2_ws/scripts/start_robot.sh
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Enable and start
+sudo systemctl daemon-reload
+sudo systemctl enable robot.service nginx
+sudo systemctl start robot.service
+```
+
+---
+
+## Quick Start
+
+### 1. Access Web UI
 
 ```
-src/
-├── robot_bringup/       # Launch 파일
-├── robot_driver/        # 모터 드라이버 (Modbus)
-├── robot_description/   # URDF
-├── robot_web/           # Web UI + Camera
-│   ├── www/             # HTML/CSS/JS
-│   └── scripts/         # camera_node.py
-├── robot_ai/            # AI 모드
-│   ├── scripts/         # yolo_detector.py, mode_controller.py
-│   └── models/          # TensorRT engines (gitignore)
-├── robot_slam/          # Cartographer
-├── robot_navigation/    # Nav2
-└── ldlidar_stl_ros2/    # LD19 드라이버
+http://<ROBOT_IP>:8888
 ```
 
-## 키보드 제어
+### 2. Control Tabs
+
+| Tab | Function |
+|-----|----------|
+| **Control** | Camera view + Joystick control |
+| **Map** | SLAM / Navigation / Goal setting |
+| **Clean** | Auto SLAM exploration |
+| **AI** | YOLO object detection |
+
+### 3. Keyboard Control
 
 | Key | Action |
 |-----|--------|
-| W | 전진 |
-| S | 후진 |
-| A | 좌회전 |
-| D | 우회전 |
-| Space | 정지 |
+| `W` | Forward |
+| `S` | Backward |
+| `A` | Turn Left |
+| `D` | Turn Right |
+| `Space` | Stop |
 
-## 하드웨어
+---
 
-- **보드**: Jetson Orin Nano Super (8GB)
-- **카메라**: IMX219 CSI
-- **LiDAR**: LD19 (360°)
-- **모터**: Modbus (ttyTHS1)
+## Architecture
 
-## 트러블슈팅
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    Web Browser (port 8888)                       │
+│  ┌───────────────────────────────────────────────────────────┐  │
+│  │   [Control]  [Map]  [Clean]  [AI]                         │  │
+│  ├───────────────────────────────────────────────────────────┤  │
+│  │                                                           │  │
+│  │          Camera / Map Canvas                              │  │
+│  │                                                           │  │
+│  ├─────────────────┬─────────────────────────────────────────┤  │
+│  │     LiDAR       │              Joystick                   │  │
+│  └─────────────────┴─────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────┘
+                              │ WebSocket (9090)
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                        ROS2 Humble                               │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐          │
+│  │  rosbridge   │  │ camera_node  │  │mode_controller│          │
+│  │    (9090)    │  │   (8080)     │  │              │          │
+│  └──────────────┘  └──────────────┘  └──────────────┘          │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐          │
+│  │ robot_driver │  │  LD19 LiDAR  │  │ yolo_detector│          │
+│  │  (Modbus)    │  │   (/scan)    │  │  (TensorRT)  │          │
+│  └──────────────┘  └──────────────┘  └──────────────┘          │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐          │
+│  │ cartographer │  │    Nav2      │  │ auto_explore │          │
+│  │   (SLAM)     │  │ (Navigation) │  │   (Clean)    │          │
+│  └──────────────┘  └──────────────┘  └──────────────┘          │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                        Hardware                                  │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐          │
+│  │ Jetson Orin  │  │  IMX219 CSI  │  │  LD19 LiDAR  │          │
+│  │  Nano Super  │  │   Camera     │  │    360°      │          │
+│  └──────────────┘  └──────────────┘  └──────────────┘          │
+│  ┌──────────────┐                                               │
+│  │ Motor Driver │                                               │
+│  │  (Modbus)    │                                               │
+│  └──────────────┘                                               │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## ROS Topics
+
+### Core Topics
+
+| Topic | Type | Description |
+|-------|------|-------------|
+| `/cmd_vel` | Twist | Velocity command |
+| `/odom` | Odometry | Robot odometry |
+| `/scan` | LaserScan | LiDAR scan data |
+| `/map` | OccupancyGrid | SLAM map |
+| `/camera/image_raw/compressed` | CompressedImage | Camera stream |
+
+### Control Topics
+
+| Topic | Type | Description |
+|-------|------|-------------|
+| `/robot/mode` | String | Mode selection (manual/slam/nav/explore) |
+| `/robot/ai_mode` | String | AI mode (yolo/off) |
+| `/robot/save_map` | String | Save map command |
+| `/goal_pose` | PoseStamped | Navigation goal |
+| `/initialpose` | PoseWithCovarianceStamped | Initial pose |
+
+### AI Topics
+
+| Topic | Type | Description |
+|-------|------|-------------|
+| `/detections` | String | YOLO detections (JSON) |
+| `/person_detected` | Bool | Person detection flag |
+
+---
+
+## Ports
+
+| Port | Service | Description |
+|------|---------|-------------|
+| **8888** | nginx | Web UI |
+| **8080** | camera_node | MJPEG stream |
+| **9090** | rosbridge | WebSocket |
+
+---
+
+## Performance
+
+### YOLOv8n TensorRT (FP16)
+
+| Metric | Value |
+|--------|-------|
+| Engine Size | 9 MB |
+| Throughput | **147 FPS** |
+| Latency (mean) | 7.6 ms |
+| GPU Compute | 6.8 ms |
+
+### Camera
+
+| Metric | Value |
+|--------|-------|
+| Resolution | 640 x 360 (16:9) |
+| FPS | 15 |
+| Encoding | Hardware JPEG (nvjpegenc) |
+
+---
+
+## Package Structure
+
+```
+ros2_ws/
+├── src/
+│   ├── robot_bringup/        # Launch files
+│   ├── robot_driver/         # Motor driver (Modbus)
+│   ├── robot_description/    # URDF model
+│   ├── robot_web/            # Web UI
+│   │   ├── www/              # HTML/CSS/JS
+│   │   └── scripts/          # camera_node.py
+│   ├── robot_ai/             # AI features
+│   │   ├── scripts/          # yolo_detector, mode_controller
+│   │   └── models/           # TensorRT engines
+│   ├── robot_slam/           # Cartographer SLAM
+│   ├── robot_navigation/     # Nav2 navigation
+│   └── ldlidar_stl_ros2/     # LD19 driver
+├── maps/                     # Saved maps
+├── scripts/                  # Start/stop scripts
+└── docs/                     # Documentation
+```
+
+---
+
+## Troubleshooting
+
+### Check Services
 
 ```bash
-# 노드 확인
+# Service status
+systemctl status robot.service nginx
+
+# View logs
+journalctl -u robot.service -f
+
+# ROS2 nodes
 ros2 node list
 
-# 토픽 확인
+# Topic frequency
 ros2 topic hz /scan
 ros2 topic hz /camera/image_raw/compressed
-
-# 서비스 재시작
-sudo systemctl restart robot.service
 ```
+
+### Common Issues
+
+| Issue | Solution |
+|-------|----------|
+| Web UI not loading | Check nginx: `sudo systemctl restart nginx` |
+| Camera not working | Check CSI connection, restart service |
+| LiDAR no data | Check USB connection, `/dev/ttyUSB0` |
+| SLAM map not showing | Press SLAM button, drive around |
+| Navigation fails | Save map first, then start Nav |
+
+### Restart Services
+
+```bash
+# Restart robot service
+sudo systemctl restart robot.service
+
+# Restart all
+sudo systemctl restart robot.service nginx
+```
+
+---
+
+## Documentation
+
+Full documentation available at: [GitHub Pages](https://hwkim3330.github.io/jetson_robot/)
+
+- [Installation Guide](docs/installation.md)
+- [Hardware Setup](docs/hardware.md)
+- [Web UI Guide](docs/web-ui.md)
+- [SLAM & Navigation](docs/slam-navigation.md)
+- [AI Features](docs/ai-features.md)
+- [API Reference](docs/api-reference.md)
+
+---
+
+## Contributing
+
+1. Fork the repository
+2. Create feature branch (`git checkout -b feature/AmazingFeature`)
+3. Commit changes (`git commit -m 'Add AmazingFeature'`)
+4. Push to branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request
+
+---
 
 ## License
 
-Apache 2.0
+This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
+
+---
+
+## Acknowledgments
+
+- [ROS2](https://docs.ros.org/en/humble/) - Robot Operating System
+- [NVIDIA Jetson](https://developer.nvidia.com/embedded-computing) - Edge AI Platform
+- [Cartographer](https://google-cartographer-ros.readthedocs.io/) - SLAM
+- [Nav2](https://navigation.ros.org/) - Navigation Stack
+- [YOLOv8](https://docs.ultralytics.com/) - Object Detection
+- [KETI](https://www.keti.re.kr/) - Korea Electronics Technology Institute
+
+---
+
+<div align="center">
+
+**Built with NVIDIA Jetson Orin Nano Super**
+
+</div>

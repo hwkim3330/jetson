@@ -403,4 +403,113 @@ rclpy.spin(AIController())
 '''],
             output='screen'
         ),
+
+        # Auto Explore Node - simple obstacle avoidance exploration
+        ExecuteProcess(
+            cmd=['python3', '-c', '''
+import rclpy
+from rclpy.node import Node
+from sensor_msgs.msg import LaserScan
+from geometry_msgs.msg import Twist
+from std_msgs.msg import String
+import math
+
+class ExploreNode(Node):
+    def __init__(self):
+        super().__init__("explore_node")
+        self.linear_speed = 0.15
+        self.angular_speed = 0.8
+        self.obstacle_dist = 0.45
+        self.side_dist = 0.30
+        self.exploring = False
+        self.state = "forward"
+        self.rotate_time = 0.0
+        self.scan_data = None
+
+        self.cmd_pub = self.create_publisher(Twist, "/cmd_vel", 10)
+        self.create_subscription(String, "/robot/mode", self.mode_cb, 10)
+        self.create_subscription(LaserScan, "/scan", self.scan_cb, 10)
+        self.create_timer(0.1, self.control)
+        self.get_logger().info("Explore node ready")
+
+    def mode_cb(self, msg):
+        if msg.data == "explore":
+            if not self.exploring:
+                self.exploring = True
+                self.state = "forward"
+                self.get_logger().info("Auto explore started")
+        else:
+            if self.exploring:
+                self.exploring = False
+                self.stop()
+                self.get_logger().info("Auto explore stopped")
+
+    def scan_cb(self, msg):
+        self.scan_data = msg
+
+    def get_min_range(self, start_deg, end_deg):
+        if not self.scan_data:
+            return float("inf")
+        min_r = float("inf")
+        for deg in range(int(start_deg), int(end_deg), 3):
+            rad = math.radians(deg)
+            if rad < self.scan_data.angle_min or rad > self.scan_data.angle_max:
+                continue
+            idx = int((rad - self.scan_data.angle_min) / self.scan_data.angle_increment)
+            if 0 <= idx < len(self.scan_data.ranges):
+                r = self.scan_data.ranges[idx]
+                if self.scan_data.range_min < r < self.scan_data.range_max and r < min_r:
+                    min_r = r
+        return min_r
+
+    def control(self):
+        if not self.exploring or not self.scan_data:
+            return
+        front = self.get_min_range(-25, 25)
+        front_left = self.get_min_range(25, 60)
+        front_right = self.get_min_range(-60, -25)
+        left = self.get_min_range(60, 100)
+        right = self.get_min_range(-100, -60)
+        cmd = Twist()
+
+        if self.state == "forward":
+            if front < self.obstacle_dist:
+                self.state = "rotate_left" if left > right else "rotate_right"
+                self.rotate_time = 0.0
+                self.get_logger().info(f"Obstacle at {front:.2f}m, turning")
+            elif front_left < self.side_dist:
+                cmd.linear.x = self.linear_speed * 0.7
+                cmd.angular.z = -0.3
+            elif front_right < self.side_dist:
+                cmd.linear.x = self.linear_speed * 0.7
+                cmd.angular.z = 0.3
+            else:
+                cmd.linear.x = self.linear_speed
+        elif self.state == "rotate_left":
+            self.rotate_time += 0.1
+            cmd.angular.z = self.angular_speed
+            if front > self.obstacle_dist * 1.5 and self.rotate_time > 0.5:
+                self.state = "forward"
+            elif self.rotate_time > 4.0:
+                self.state = "rotate_right"
+                self.rotate_time = 0.0
+        elif self.state == "rotate_right":
+            self.rotate_time += 0.1
+            cmd.angular.z = -self.angular_speed
+            if front > self.obstacle_dist * 1.5 and self.rotate_time > 0.5:
+                self.state = "forward"
+            elif self.rotate_time > 4.0:
+                self.state = "rotate_left"
+                self.rotate_time = 0.0
+
+        self.cmd_pub.publish(cmd)
+
+    def stop(self):
+        self.cmd_pub.publish(Twist())
+
+rclpy.init()
+rclpy.spin(ExploreNode())
+'''],
+            output='screen'
+        ),
     ])

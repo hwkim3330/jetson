@@ -9,6 +9,7 @@ install(PROGRAMS
   scripts/slam_controller.py
   scripts/web_server.py
   scripts/camera_node.py
+  scripts/explore_node.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
