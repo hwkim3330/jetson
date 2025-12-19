@@ -142,6 +142,7 @@
                 <!-- Right actions -->
                 <div class="map-actions">
                     <button class="mbtn" id="bGoal">Goal</button>
+                    <button class="mbtn" id="bCenter">Center</button>
                     <button class="mbtn green" id="bSave">Save</button>
                 </div>
                 <div class="mstat" id="mstat">Ready</div>
@@ -209,9 +210,11 @@ const boxCanvas = document.getElementById('boxCanvas');
 // ROS2D viewer components
 let mapViewer = null;
 let gridClient = null;
+let overlayContainer = null;  // Container for markers (renders on top of map)
 let robotMarker = null;
 let goalMarkerShape = null;
 let pathLine = null;
+let initialScaleDone = false;  // Only auto-scale on first map
 
 // Map state
 let mapData = null, mapInfo = null;
@@ -250,29 +253,36 @@ function initMapViewer() {
     });
     console.log('ROS2D Viewer created:', w, 'x', h);
 
-    // Robot marker (navigation arrow) - size in meters
+    // Setup gridClient FIRST (so map is rendered at bottom)
+    if(conn) setupMapClient();
+
+    // Create overlay container for markers (added AFTER gridClient, so renders ON TOP of map)
+    overlayContainer = new createjs.Container();
+    mapViewer.scene.addChild(overlayContainer);
+
+    // Path line (at bottom of overlay)
+    pathLine = new createjs.Shape();
+    overlayContainer.addChild(pathLine);
+
+    // Goal marker - size in meters (middle layer)
+    goalMarkerShape = new createjs.Shape();
+    goalMarkerShape.graphics.beginFill('#ff3b30').drawCircle(0, 0, 0.25);
+    goalMarkerShape.graphics.beginFill('#fff').drawCircle(0, 0, 0.1);
+    goalMarkerShape.visible = false;
+    overlayContainer.addChild(goalMarkerShape);
+
+    // Robot marker (navigation arrow) - on top
     robotMarker = new ROS2D.NavigationArrow({
-        size: 0.4,  // 40cm arrow
-        strokeSize: 0.02,
+        size: 0.5,  // 50cm arrow for visibility
+        strokeSize: 0.03,
         fillColor: createjs.Graphics.getRGB(0, 122, 255),
         pulse: false
     });
     robotMarker.visible = false;
-    mapViewer.scene.addChild(robotMarker);
+    overlayContainer.addChild(robotMarker);
 
-    // Goal marker - size in meters
-    goalMarkerShape = new createjs.Shape();
-    goalMarkerShape.graphics.beginFill('#ff3b30').drawCircle(0, 0, 0.2);  // 20cm outer
-    goalMarkerShape.graphics.beginFill('#fff').drawCircle(0, 0, 0.08);  // 8cm inner
-    goalMarkerShape.visible = false;
-    mapViewer.scene.addChild(goalMarkerShape);
-
-    // Path line
-    pathLine = new createjs.Shape();
-    mapViewer.scene.addChild(pathLine);
-
-    // Setup gridClient if ROS already connected
-    if(conn) setupMapClient();
+    // Reset scale flag when viewer is recreated
+    initialScaleDone = false;
 }
 function resizeMapViewer() {
     if(!mapViewer) return;
@@ -329,6 +339,10 @@ document.getElementById('bSlam').onclick = function() {
     if(modePub) modePub.publish(new ROSLIB.Message({data: slam ? 'slam' : 'manual'}));
     mapMode = 'none';
     document.getElementById('bGoal').classList.remove('on');
+    // Reset view scale on SLAM start so new map fits
+    if(slam) {
+        initialScaleDone = false;
+    }
 };
 document.getElementById('bNav').onclick = function() {
     if(slam) { slam = false; document.getElementById('bSlam').classList.remove('on'); }
@@ -411,6 +425,16 @@ document.getElementById('bGoal').onclick = function() {
     mapMode = mapMode === 'goal' ? 'none' : 'goal';
     this.classList.toggle('on', mapMode === 'goal');
     document.getElementById('mstat').textContent = mapMode === 'goal' ? 'Tap map to set goal' : (goNav ? 'Go Mode' : 'Nav Active');
+};
+
+// Center view button - recenter and rescale map
+document.getElementById('bCenter').onclick = function() {
+    initialScaleDone = false;  // Reset so next change event will center
+    if(gridClient && gridClient.currentGrid) {
+        centerMapView();
+        initialScaleDone = true;
+    }
+    document.getElementById('mstat').textContent = 'View centered';
 };
 
 // Map click handling is done via ros2d scene event in setupMapClient()
@@ -530,8 +554,8 @@ function setupMapClient() {
             const resolution = gridClient.currentGrid.scaleX || 0.05;
             // Grid origin position from pose (set by OccupancyGrid from message origin)
             const pose = gridClient.currentGrid.pose;
-            const originX = pose ? pose.position.x : (gridClient.currentGrid.x || 0);
-            const originY = pose ? pose.position.y : (gridClient.currentGrid.y + mapHeight || 0);  // y stores -height-originY
+            const originX = pose ? pose.position.x : 0;
+            const originY = pose ? pose.position.y : 0;
 
             mapInfo = {
                 width: Math.round(mapWidth / resolution),  // Grid cells
@@ -540,33 +564,14 @@ function setupMapClient() {
                 origin: {position: {x: originX, y: originY}}
             };
 
-            console.log('Map info:', mapWidth.toFixed(2), 'x', mapHeight.toFixed(2), 'm, origin:', originX.toFixed(2), originY.toFixed(2));
-
-            // Scale to fit map with uniform aspect ratio (use smaller scale to fit both dimensions)
-            const viewerW = mapViewer.width;
-            const viewerH = mapViewer.height;
-            const scaleX = viewerW / mapWidth;
-            const scaleY = viewerH / mapHeight;
-            const scale = Math.min(scaleX, scaleY) * 0.9;  // 90% to leave margin
-
-            // Apply uniform scale
-            mapViewer.scene.scaleX = scale;
-            mapViewer.scene.scaleY = scale;
-
-            // Center the map in the viewer
-            // Map center in world coordinates
-            const mapCenterX = originX + mapWidth / 2;
-            const mapCenterY = originY + mapHeight / 2;
-
-            // Position scene so map center is at viewer center
-            // scene.x + mapCenterX * scale = viewerW/2
-            // scene.y - mapCenterY * scale = viewerH/2  (Y is flipped in ROS2D)
-            mapViewer.scene.x = viewerW / 2 - mapCenterX * scale;
-            mapViewer.scene.y = viewerH / 2 + mapCenterY * scale;
-
             // Update map info display
             document.getElementById('mapInfo').innerHTML = `${mapWidth.toFixed(1)}×${mapHeight.toFixed(1)}m`;
-            console.log('Map centered at world:', mapCenterX.toFixed(2), mapCenterY.toFixed(2), 'scale:', scale.toFixed(1));
+
+            // Only auto-scale on first map load (prevents jumping during SLAM)
+            if(!initialScaleDone) {
+                initialScaleDone = true;
+                centerMapView();
+            }
         }
     });
 
@@ -589,6 +594,40 @@ function setupMapClient() {
         document.getElementById('bGoal').classList.remove('on');
         updateMapOverlays();
     });
+}
+
+// Center map view on current map or robot position
+function centerMapView() {
+    if(!mapViewer || !gridClient || !gridClient.currentGrid) return;
+
+    const mapWidth = gridClient.currentGrid.width;
+    const mapHeight = gridClient.currentGrid.height;
+    const pose = gridClient.currentGrid.pose;
+    const originX = pose ? pose.position.x : 0;
+    const originY = pose ? pose.position.y : 0;
+
+    const viewerW = mapViewer.width;
+    const viewerH = mapViewer.height;
+
+    // Calculate uniform scale to fit map with margin
+    const scaleX = viewerW / mapWidth;
+    const scaleY = viewerH / mapHeight;
+    const scale = Math.min(scaleX, scaleY) * 0.85;  // 85% to leave margin
+
+    // Apply uniform scale
+    mapViewer.scene.scaleX = scale;
+    mapViewer.scene.scaleY = scale;
+
+    // Calculate map center in world coordinates
+    const mapCenterX = originX + mapWidth / 2;
+    const mapCenterY = originY + mapHeight / 2;
+
+    // Position scene so map center is at viewer center
+    // In ROS2D: screen_y = scene.y - world_y * scale (Y is flipped)
+    mapViewer.scene.x = viewerW / 2 - mapCenterX * scale;
+    mapViewer.scene.y = viewerH / 2 + mapCenterY * scale;
+
+    console.log('Map centered:', mapWidth.toFixed(1), 'x', mapHeight.toFixed(1), 'm, scale:', scale.toFixed(1), 'px/m');
 }
 
 // TF callback - extract map→odom transform
