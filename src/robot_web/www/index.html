@@ -437,7 +437,7 @@ function connect() {
 }
 
 function setup() {
-    cmdVel = new ROSLIB.Topic({ros, name:'/cmd_vel_raw', messageType:'geometry_msgs/Twist'});
+    cmdVel = new ROSLIB.Topic({ros, name:'/cmd_vel', messageType:'geometry_msgs/Twist'});
     aiPub = new ROSLIB.Topic({ros, name:'/robot/ai_mode', messageType:'std_msgs/String'});
     modePub = new ROSLIB.Topic({ros, name:'/robot/mode', messageType:'std_msgs/String'});
     savePub = new ROSLIB.Topic({ros, name:'/robot/save_map', messageType:'std_msgs/String'});
@@ -592,6 +592,32 @@ function drawMap() {
         mapCtx.fill();
     }
 
+    // Draw JS navigation path (cyan dashed line from robot to goal)
+    if((goNav || autoSlam) && (goalPose || frontierGoal)) {
+        const target = goalPose || frontierGoal;
+        mapCtx.strokeStyle = '#00bcd4';
+        mapCtx.lineWidth = 2;
+        mapCtx.setLineDash([6, 4]);
+        mapCtx.beginPath();
+        mapCtx.moveTo(cx, cy);  // Robot at center
+        const g = w2c(target.x, target.y);
+        mapCtx.lineTo(g.x, g.y);
+        mapCtx.stroke();
+        mapCtx.setLineDash([]);
+    }
+
+    // Draw frontier goal (yellow circle)
+    if(autoSlam && frontierGoal) {
+        const fg = w2c(frontierGoal.x, frontierGoal.y);
+        mapCtx.fillStyle = '#ffeb3b';
+        mapCtx.strokeStyle = '#ff9800';
+        mapCtx.lineWidth = 2;
+        mapCtx.beginPath();
+        mapCtx.arc(fg.x, fg.y, 7, 0, Math.PI*2);
+        mapCtx.fill();
+        mapCtx.stroke();
+    }
+
     // Draw goal (red target)
     if(goalPose) {
         const g = w2c(goalPose.x, goalPose.y);
@@ -622,18 +648,36 @@ function drawMap() {
     mapCtx.restore();
 }
 
-// LiDAR
+// LiDAR - ROS standard: x=forward, y=left
 let ld = 0;
+let scanRanges = [];  // Raw scan for algorithms
 function onScan(m) {
     pts = [];
+    scanRanges = m.ranges;
     for(let i=0; i<m.ranges.length; i+=4) {
         const r = m.ranges[i];
         if(r > m.range_min && r < Math.min(m.range_max, 5)) {
             const a = m.angle_min + i * m.angle_increment;
-            pts.push({x: r*Math.cos(a-Math.PI/2), y: r*Math.sin(a-Math.PI/2), d: r});
+            // Standard ROS: x=forward, y=left
+            const x = r * Math.cos(a);
+            const y = r * Math.sin(a);
+            // For display: rotate 90deg (up=forward)
+            pts.push({x: -y, y: -x, d: r, rx: x, ry: y});
         }
     }
     if(Date.now() - ld > 150) { ld = Date.now(); drawLids(); }
+}
+
+// Get minimum distance in angle range (degrees, 0=front, positive=left)
+function getMinDist(startDeg, endDeg) {
+    let minD = 10;
+    for(const p of pts) {
+        const ang = Math.atan2(p.ry, p.rx) * 180 / Math.PI;
+        if(ang >= startDeg && ang <= endDeg && p.d < minD) {
+            minD = p.d;
+        }
+    }
+    return minD;
 }
 
 function dc(d) { return d<0.5 ? '#ff3b30' : d<1 ? '#ff9500' : d<2 ? '#ffcc00' : '#34c759'; }
@@ -771,18 +815,15 @@ function navLoop() {
     while(angleDiff > Math.PI) angleDiff -= 2*Math.PI;
     while(angleDiff < -Math.PI) angleDiff += 2*Math.PI;
 
-    // Check for obstacles (using pts from lidar)
-    let frontClear = true;
-    let leftClear = true;
-    let rightClear = true;
-    const obstDist = 0.4;
+    // Check obstacles using getMinDist
+    const front = getMinDist(-30, 30);
+    const frontLeft = getMinDist(30, 60);
+    const frontRight = getMinDist(-60, -30);
+    const left = getMinDist(60, 120);
+    const right = getMinDist(-120, -60);
 
-    for(const p of pts) {
-        // Front sector (-30 to +30 degrees, lidar coords: x=forward, y=left)
-        if(p.x > 0 && Math.abs(p.y) < 0.3 && p.d < obstDist) frontClear = false;
-        if(p.x > 0 && p.y > 0.1 && p.d < obstDist * 0.8) leftClear = false;
-        if(p.x > 0 && p.y < -0.1 && p.d < obstDist * 0.8) rightClear = false;
-    }
+    const STOP_DIST = 0.25;   // 25cm - emergency stop
+    const SLOW_DIST = 0.35;   // 35cm - slow down
 
     // Reached goal?
     if(dist < 0.15) {
@@ -794,19 +835,30 @@ function navLoop() {
 
     let lin = 0, ang = 0;
 
-    // Obstacle avoidance
-    if(!frontClear) {
-        // Rotate to avoid
-        ang = leftClear ? 0.8 : (rightClear ? -0.8 : 0.8);
-        lin = 0;
+    // Obstacle avoidance with priority
+    if(front < STOP_DIST) {
+        // Emergency stop - back up and turn
+        lin = -0.05;
+        ang = left > right ? 0.8 : -0.8;
+    } else if(front < SLOW_DIST || frontLeft < STOP_DIST || frontRight < STOP_DIST) {
+        // Obstacle nearby - navigate around
+        if(frontLeft < frontRight) {
+            ang = -0.5;  // Turn right
+        } else {
+            ang = 0.5;   // Turn left
+        }
+        lin = 0.08;
     } else if(Math.abs(angleDiff) > 0.3) {
         // Need to rotate toward goal
-        ang = angleDiff > 0 ? 0.6 : -0.6;
-        lin = 0.05;  // Slow forward while turning
+        ang = angleDiff > 0 ? 0.5 : -0.5;
+        lin = 0.08;
     } else {
-        // Go forward
-        lin = Math.min(0.2, dist * 0.5);
-        ang = angleDiff * 1.0;  // Small correction
+        // Go forward toward goal
+        lin = Math.min(0.18, dist * 0.4);
+        ang = angleDiff * 0.6;
+        // Slight correction for side obstacles
+        if(frontLeft < SLOW_DIST) ang -= 0.1;
+        if(frontRight < SLOW_DIST) ang += 0.1;
     }
 
     send(lin, ang);
@@ -913,25 +965,20 @@ function exploreLoop() {
             document.getElementById('mstat').textContent = `Exploring (${frontierGoal.x.toFixed(1)}, ${frontierGoal.y.toFixed(1)})`;
         } else {
             document.getElementById('mstat').textContent = 'Exploration complete!';
-            // No frontiers - do random movement
             frontierGoal = null;
         }
     }
 
-    // Navigate toward frontier goal with obstacle avoidance
+    // Check obstacles using getMinDist (degrees: 0=front, +left, -right)
+    const front = getMinDist(-30, 30);      // Front 60 degrees
+    const frontLeft = getMinDist(30, 60);   // Front-left
+    const frontRight = getMinDist(-60, -30); // Front-right
+    const left = getMinDist(60, 120);       // Left side
+    const right = getMinDist(-120, -60);    // Right side
+
     let lin = 0, ang = 0;
-
-    // Check obstacles
-    let frontClear = true;
-    let leftClear = true;
-    let rightClear = true;
-    const obstDist = 0.4;
-
-    for(const p of pts) {
-        if(p.x > 0 && Math.abs(p.y) < 0.25 && p.d < obstDist) frontClear = false;
-        if(p.x > 0 && p.y > 0.1 && p.d < obstDist * 0.7) leftClear = false;
-        if(p.x > 0 && p.y < -0.1 && p.d < obstDist * 0.7) rightClear = false;
-    }
+    const STOP_DIST = 0.35;   // Emergency stop distance
+    const SLOW_DIST = 0.5;    // Slow down distance
 
     if(frontierGoal) {
         const dx = frontierGoal.x - robotPose.x;
@@ -941,26 +988,41 @@ function exploreLoop() {
         while(angleDiff > Math.PI) angleDiff -= 2*Math.PI;
         while(angleDiff < -Math.PI) angleDiff += 2*Math.PI;
 
-        if(!frontClear) {
-            // Obstacle - rotate to avoid
-            ang = leftClear ? 0.8 : (rightClear ? -0.8 : 0.8);
+        if(front < STOP_DIST) {
+            // Emergency: obstacle too close - rotate away
+            lin = -0.05;  // Back up slightly
+            ang = left > right ? 0.8 : -0.8;
+        } else if(front < SLOW_DIST || frontLeft < STOP_DIST || frontRight < STOP_DIST) {
+            // Obstacle nearby - turn to avoid
+            if(frontLeft < frontRight) {
+                ang = -0.6;  // Turn right
+            } else {
+                ang = 0.6;   // Turn left
+            }
+            lin = 0.05;
         } else if(Math.abs(angleDiff) > 0.4) {
             // Rotate toward goal
-            ang = angleDiff > 0 ? 0.6 : -0.6;
-            lin = 0.05;
+            ang = angleDiff > 0 ? 0.5 : -0.5;
+            lin = 0.08;
         } else {
-            // Go forward
-            lin = 0.18;
-            ang = angleDiff * 0.8;
-            if(!leftClear) ang -= 0.2;
-            if(!rightClear) ang += 0.2;
+            // Go forward toward goal
+            lin = 0.15;
+            ang = angleDiff * 0.6;
+            // Slight correction for side obstacles
+            if(frontLeft < SLOW_DIST) ang -= 0.15;
+            if(frontRight < SLOW_DIST) ang += 0.15;
         }
     } else {
-        // No goal - random wander
-        if(!frontClear) {
-            ang = leftClear ? 0.8 : -0.8;
+        // No goal - random wander with obstacle avoidance
+        if(front < STOP_DIST) {
+            lin = -0.05;
+            ang = left > right ? 0.8 : -0.8;
+        } else if(front < SLOW_DIST) {
+            ang = left > right ? 0.5 : -0.5;
+            lin = 0.05;
         } else {
             lin = 0.12;
+            ang = 0;
         }
     }
 
