@@ -170,6 +170,13 @@ document.addEventListener('touchmove', e => e.preventDefault(), { passive: false
 let ros, cmdVel, aiPub, modePub, goalPub, initPosePub, savePub, conn = false;
 let pts = [], yolo = false, boxes = [];
 const ML = 0.3, MA = 1.5, CAM_W = 640, CAM_H = 360;
+
+// TF transform from map to odom (for SLAM/Nav correction)
+let mapToOdom = {x: 0, y: 0, theta: 0};
+let odomPose = {x: 0, y: 0, theta: 0};  // Raw odom frame pose
+let useMapFrame = false;  // Whether to apply map→odom correction
+let lastTFTime = 0;  // Timestamp of last TF update
+const TF_TIMEOUT = 2000;  // Fall back to odom if no TF for 2 seconds
 const lids = ['lid1','lid2','lid3'].map(id => document.getElementById(id));
 const boxCanvas = document.getElementById('boxCanvas');
 const mapCanvas = document.getElementById('mapCanvas');
@@ -451,6 +458,59 @@ function setup() {
     new ROSLIB.Topic({ros, name:'/map', messageType:'nav_msgs/OccupancyGrid', throttle_rate:2000}).subscribe(onMap);
     new ROSLIB.Topic({ros, name:'/plan', messageType:'nav_msgs/Path', throttle_rate:1000}).subscribe(onGlobalPath);
     new ROSLIB.Topic({ros, name:'/local_plan', messageType:'nav_msgs/Path', throttle_rate:500}).subscribe(onLocalPath);
+
+    // Subscribe to TF for map→odom transform (used during SLAM/Nav)
+    new ROSLIB.Topic({ros, name:'/tf', messageType:'tf2_msgs/TFMessage', throttle_rate:200}).subscribe(onTF);
+}
+
+// TF callback - extract map→odom transform
+function onTF(msg) {
+    if(!msg.transforms) return;
+
+    for(const tf of msg.transforms) {
+        // Look for map→odom transform (published by cartographer/AMCL)
+        if(tf.header.frame_id === 'map' && tf.child_frame_id === 'odom') {
+            const t = tf.transform.translation;
+            const q = tf.transform.rotation;
+            // Extract yaw from quaternion
+            const theta = Math.atan2(2*(q.w*q.z + q.x*q.y), 1 - 2*(q.y*q.y + q.z*q.z));
+
+            mapToOdom = {x: t.x, y: t.y, theta: theta};
+            useMapFrame = true;
+            lastTFTime = Date.now();
+
+            // Update robot pose in map frame
+            updateRobotPoseInMapFrame();
+        }
+    }
+}
+
+// Apply map→odom transform to get pose in map frame
+function updateRobotPoseInMapFrame() {
+    // Check if TF has timed out (SLAM/Nav stopped or no transform available)
+    if(useMapFrame && Date.now() - lastTFTime > TF_TIMEOUT) {
+        useMapFrame = false;
+        mapToOdom = {x: 0, y: 0, theta: 0};
+    }
+
+    if(!useMapFrame) {
+        robotPose = {...odomPose};
+        return;
+    }
+
+    // Transform odom pose to map frame: map_pose = map_to_odom * odom_pose
+    const cosT = Math.cos(mapToOdom.theta);
+    const sinT = Math.sin(mapToOdom.theta);
+
+    robotPose = {
+        x: mapToOdom.x + cosT * odomPose.x - sinT * odomPose.y,
+        y: mapToOdom.y + sinT * odomPose.x + cosT * odomPose.y,
+        theta: odomPose.theta + mapToOdom.theta
+    };
+
+    // Normalize theta to [-PI, PI]
+    while(robotPose.theta > Math.PI) robotPose.theta -= 2*Math.PI;
+    while(robotPose.theta < -Math.PI) robotPose.theta += 2*Math.PI;
 }
 
 // Map callback - create cached image
@@ -700,20 +760,25 @@ function drawLids() {
     });
 }
 
-// Odom
+// Odom - store in odom frame, then transform to map frame
 function onOdom(m) {
     const x = m.pose.pose.position.x;
     const y = m.pose.pose.position.y;
     const q = m.pose.pose.orientation;
     const t = Math.atan2(2*(q.w*q.z), 1-2*q.z*q.z);
 
-    robotPose = {x: x, y: y, theta: t};
+    // Store odom frame pose
+    odomPose = {x: x, y: y, theta: t};
 
+    // Apply map→odom transform if available
+    updateRobotPoseInMapFrame();
+
+    // Display map-frame pose (or odom if no TF yet)
     ['1','2','3'].forEach(i => {
         const ex = document.getElementById('x'+i), ey = document.getElementById('y'+i), et = document.getElementById('t'+i);
-        if(ex) ex.textContent = x.toFixed(2);
-        if(ey) ey.textContent = y.toFixed(2);
-        if(et) et.textContent = Math.round(t * 180/Math.PI) + '°';
+        if(ex) ex.textContent = robotPose.x.toFixed(2);
+        if(ey) ey.textContent = robotPose.y.toFixed(2);
+        if(et) et.textContent = Math.round(robotPose.theta * 180/Math.PI) + '°';
     });
 }
 
