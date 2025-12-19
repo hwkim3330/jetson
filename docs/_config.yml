@@ -1,0 +1,55 @@
+# Jekyll configuration for GitHub Pages
+
+# Site settings
+title: SDV Robot
+description: >-
+  Software Defined Vehicle - NVIDIA Jetson Orin Nano based autonomous robot platform
+  with web control, SLAM, navigation, and AI detection capabilities.
+baseurl: "/jetson_robot"
+url: "https://hwkim3330.github.io"
+
+# Theme
+remote_theme: pages-themes/minimal@v0.2.0
+plugins:
+  - jekyll-remote-theme
+
+# Markdown settings
+markdown: kramdown
+kramdown:
+  input: GFM
+  syntax_highlighter: rouge
+
+# Navigation
+nav:
+  - title: Home
+    url: /
+  - title: Installation
+    url: /installation
+  - title: Hardware
+    url: /hardware
+  - title: Web UI
+    url: /web-ui
+  - title: SLAM & Nav
+    url: /slam-navigation
+  - title: AI Features
+    url: /ai-features
+
+# Author
+author:
+  name: KETI Robot Team
+  url: https://www.keti.re.kr
+
+# Build settings
+exclude:
+  - Gemfile
+  - Gemfile.lock
+  - node_modules
+  - vendor
+
+# Defaults
+defaults:
+  - scope:
+      path: ""
+      type: "pages"
+    values:
+      layout: "default"
