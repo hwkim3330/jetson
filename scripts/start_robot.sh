@@ -28,7 +28,6 @@ log() {
 cleanup() {
     log "Shutting down..."
     pkill -f "rosbridge" 2>/dev/null || true
-    pkill -f "mode_controller" 2>/dev/null || true
     pkill -f "robot.launch.py" 2>/dev/null || true
     exit 0
 }
@@ -41,21 +40,16 @@ log "================================================"
 
 # Kill any existing processes
 pkill -f "rosbridge" 2>/dev/null || true
-pkill -f "mode_controller" 2>/dev/null || true
+pkill -f "robot.launch.py" 2>/dev/null || true
 sleep 2
 
 # Start rosbridge for web interface (port 9090)
-log "[1/3] Starting rosbridge..."
+log "[1/2] Starting rosbridge..."
 ros2 launch rosbridge_server rosbridge_websocket_launch.xml > /dev/null 2>&1 &
 sleep 3
 
-# Start mode controller
-log "[2/3] Starting mode_controller..."
-ros2 run robot_ai mode_controller.py > /dev/null 2>&1 &
-sleep 1
-
-# Start robot bringup (includes camera_node with MJPEG server on port 8080)
-log "[3/3] Starting robot_bringup..."
+# Start robot bringup (includes camera_node, mode_controller)
+log "[2/2] Starting robot_bringup..."
 ros2 launch robot_bringup robot.launch.py 2>&1 | tee -a $LOG_FILE &
 ROBOT_PID=$!
 
