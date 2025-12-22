@@ -117,7 +117,7 @@
     <div class="content">
         <div class="page active" id="page-control">
             <div class="camera-wrap">
-                <img id="cam1" src="" alt="" crossorigin="anonymous">
+                <img id="cam1" src="" alt="">
                 <!-- Hand tracking overlay (uses cam1 as source) -->
                 <canvas id="handCanvas" style="display:none;"></canvas>
                 <div id="gestureLabel" class="gesture-label" style="display:none;">Ready</div>
@@ -452,7 +452,8 @@ window.onresize = () => { initLids(); initBoxCanvas(); resizeMapViewer(); };
 setTimeout(() => { initLids(); initBoxCanvas(); }, 100);
 
 function setCam() {
-    const s = `http://${location.hostname||'localhost'}:8080/stream`;
+    // Use nginx proxy (/stream) for same-origin access (avoids CORS)
+    const s = `/stream`;
     document.getElementById('cam1').src = s;
     document.getElementById('cam2').src = s;
 }
