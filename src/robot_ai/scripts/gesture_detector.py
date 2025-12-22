@@ -17,7 +17,7 @@ from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import Image
 from geometry_msgs.msg import Twist, Point
-from std_msgs.msg import Bool, String
+from std_msgs.msg import Bool, String, Float32MultiArray
 from cv_bridge import CvBridge
 import cv2
 import numpy as np
@@ -71,6 +71,7 @@ class GestureDetector(Node):
         self.cmd_pub = self.create_publisher(Twist, '/cmd_vel', 10)
         self.gesture_pub = self.create_publisher(String, '/gesture', 10)
         self.hand_pub = self.create_publisher(Point, '/hand_position', 10)
+        self.landmarks_pub = self.create_publisher(Float32MultiArray, '/hand_landmarks', 10)
         self.debug_pub = self.create_publisher(Image, '/gesture/debug', 10)
 
         # Timer
@@ -170,11 +171,18 @@ class GestureDetector(Node):
             self.mp_draw.draw_landmarks(
                 frame, hand_landmarks, self.mp_hands.HAND_CONNECTIONS)
 
-            # Get landmark positions
+            # Get landmark positions (normalized 0-1)
             h, w = frame.shape[:2]
             landmarks = []
+            landmarks_normalized = []
             for lm in hand_landmarks.landmark:
                 landmarks.append((int(lm.x * w), int(lm.y * h)))
+                landmarks_normalized.extend([lm.x, lm.y])  # 21 points * 2 = 42 floats
+
+            # Publish landmarks for web overlay
+            lm_msg = Float32MultiArray()
+            lm_msg.data = landmarks_normalized
+            self.landmarks_pub.publish(lm_msg)
 
             # Calculate hand center
             xs = [l[0] for l in landmarks]
@@ -183,6 +191,11 @@ class GestureDetector(Node):
 
             # Analyze gesture
             gesture = self._analyze_gesture(landmarks)
+        else:
+            # No hand - publish empty landmarks
+            lm_msg = Float32MultiArray()
+            lm_msg.data = []
+            self.landmarks_pub.publish(lm_msg)
 
         return gesture, hand_center, frame
 
