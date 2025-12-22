@@ -10,9 +10,6 @@
     <script src="js/roslib.min.js"></script>
     <script src="js/ros2d.min.js"></script>
     <script src="js/nipplejs.min.js"></script>
-    <script src="js/mediapipe/hands.js"></script>
-    <script src="js/mediapipe/camera_utils.js"></script>
-    <script src="js/mediapipe/drawing_utils.js"></script>
     <script src="js/nav.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; user-select: none; -webkit-tap-highlight-color: transparent; }
@@ -94,12 +91,6 @@
         .ai-btn.on { background: #34c759; color: #fff; }
         .log-bar { background: #1c1c1e; color: #34c759; font-family: monospace; font-size: 11px; padding: 6px 12px; flex-shrink: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-        /* Hand tracking styles */
-        .hand-btn { position: absolute; top: 8px; left: 8px; width: 44px; height: 44px; background: rgba(255,255,255,0.9); border: none; border-radius: 50%; font-size: 20px; z-index: 10; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
-        .hand-btn:active { transform: scale(0.95); }
-        .hand-btn.on { background: #007aff; }
-        #handCanvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 5; pointer-events: none; }
-        .gesture-label { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.7); color: #fff; padding: 8px 20px; border-radius: 20px; font-size: 16px; font-weight: 600; z-index: 6; }
     </style>
 </head>
 <body>
@@ -118,10 +109,6 @@
         <div class="page active" id="page-control">
             <div class="camera-wrap">
                 <img id="cam1" src="" alt="">
-                <!-- Hand tracking overlay (uses cam1 as source) -->
-                <canvas id="handCanvas" style="display:none;"></canvas>
-                <div id="gestureLabel" class="gesture-label" style="display:none;">Ready</div>
-                <button class="hand-btn" id="bHand">🖐️</button>
             </div>
             <div class="ctrl-row dark">
                 <div class="lidar-box"><canvas id="lid1"></canvas></div>
@@ -131,7 +118,6 @@
                 <div class="odom-item"><span class="olbl">X</span><span class="oval" id="x1">0.00</span></div>
                 <div class="odom-item"><span class="olbl">Y</span><span class="oval" id="y1">0.00</span></div>
                 <div class="odom-item"><span class="olbl">θ</span><span class="oval" id="t1">0°</span></div>
-                <div class="odom-item" id="gestureStatus" style="display:none;"><span class="olbl">🖐️</span><span class="oval" id="gestureCmd">-</span></div>
             </div>
         </div>
 
@@ -1858,205 +1844,6 @@ setCam();
 connect();
 setTimeout(initJoys, 200);
 setTimeout(initMapSlots, 500);
-
-// ============================================
-// MediaPipe Hand Tracking
-// ============================================
-let handMode = false;
-let hands = null;
-let lastGesture = '';
-let gestureStartTime = 0;
-
-document.getElementById('bHand').onclick = function() {
-    handMode = !handMode;
-    this.classList.toggle('on', handMode);
-    document.getElementById('handCanvas').style.display = handMode ? 'block' : 'none';
-    document.getElementById('gestureLabel').style.display = handMode ? 'block' : 'none';
-    document.getElementById('gestureStatus').style.display = handMode ? 'flex' : 'none';
-
-    if(handMode) {
-        initHandTracking();
-    } else {
-        stopHandTracking();
-    }
-};
-
-let handLoopId = null;
-let tempCanvas = null;
-let tempCtx = null;
-
-function initHandTracking() {
-    const camImg = document.getElementById('cam1');
-    const canvas = document.getElementById('handCanvas');
-    const ctx = canvas.getContext('2d');
-
-    // Create temp canvas for image processing
-    tempCanvas = document.createElement('canvas');
-    tempCtx = tempCanvas.getContext('2d');
-
-    document.getElementById('gestureLabel').textContent = 'Loading...';
-
-    // Initialize MediaPipe Hands
-    hands = new Hands({
-        locateFile: (file) => `js/mediapipe/${file}`
-    });
-
-    hands.setOptions({
-        maxNumHands: 1,
-        modelComplexity: 1,
-        minDetectionConfidence: 0.5,
-        minTrackingConfidence: 0.5
-    });
-
-    hands.onResults((results) => onHandResults(results, canvas, ctx));
-
-    // Wait for model to load, then start processing loop
-    hands.initialize().then(() => {
-        document.getElementById('gestureLabel').textContent = 'Ready';
-        // Process robot camera image at ~10fps
-        handLoopId = setInterval(() => {
-            if(hands && camImg.complete && camImg.naturalWidth > 0) {
-                try {
-                    // Draw image to temp canvas first (handles MJPEG better)
-                    tempCanvas.width = camImg.naturalWidth;
-                    tempCanvas.height = camImg.naturalHeight;
-                    tempCtx.drawImage(camImg, 0, 0);
-                    hands.send({image: tempCanvas}).catch(e => {});
-                } catch(e) {
-                    // Silently ignore CORS or other errors
-                }
-            }
-        }, 100);
-    }).catch(e => {
-        console.error('MediaPipe init error:', e);
-        document.getElementById('gestureLabel').textContent = 'Error: ' + e.message;
-    });
-}
-
-function stopHandTracking() {
-    if(handLoopId) {
-        clearInterval(handLoopId);
-        handLoopId = null;
-    }
-    if(hands) {
-        hands.close();
-        hands = null;
-    }
-    tempCanvas = null;
-    tempCtx = null;
-    // Clear canvas
-    const canvas = document.getElementById('handCanvas');
-    const ctx = canvas.getContext('2d');
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    stop();  // Stop robot
-    lastGesture = '';
-}
-
-function onHandResults(results, canvas, ctx) {
-    // Set canvas size
-    canvas.width = canvas.offsetWidth;
-    canvas.height = canvas.offsetHeight;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    if(results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-        const landmarks = results.multiHandLandmarks[0];
-
-        // Draw hand landmarks
-        drawConnectors(ctx, landmarks, HAND_CONNECTIONS, {color: '#00FF00', lineWidth: 2});
-        drawLandmarks(ctx, landmarks, {color: '#FF0000', lineWidth: 1, radius: 3});
-
-        // Recognize gesture and control robot
-        const gesture = recognizeGesture(landmarks);
-        applyGestureControl(gesture);
-    } else {
-        document.getElementById('gestureLabel').textContent = 'No hand detected';
-        document.getElementById('gestureCmd').textContent = '-';
-        // Stop if no hand for a while
-        if(lastGesture) {
-            stop();
-            lastGesture = '';
-        }
-    }
-}
-
-function recognizeGesture(landmarks) {
-    // Key points
-    const wrist = landmarks[0];
-    const thumbTip = landmarks[4];
-    const indexTip = landmarks[8];
-    const middleTip = landmarks[12];
-    const ringTip = landmarks[16];
-    const pinkyTip = landmarks[20];
-    const indexMcp = landmarks[5];
-    const middleMcp = landmarks[9];
-
-    // Finger extension detection (tip above mcp = extended)
-    const indexUp = indexTip.y < indexMcp.y - 0.05;
-    const middleUp = middleTip.y < middleMcp.y - 0.05;
-    const ringUp = ringTip.y < landmarks[13].y - 0.05;
-    const pinkyUp = pinkyTip.y < landmarks[17].y - 0.05;
-    const thumbOut = Math.abs(thumbTip.x - wrist.x) > 0.1;
-
-    // Palm center for tilt detection
-    const palmX = (landmarks[0].x + landmarks[5].x + landmarks[17].x) / 3;
-
-    // Gesture recognition
-    if(indexUp && middleUp && ringUp && pinkyUp && thumbOut) {
-        // All fingers up = STOP
-        return 'STOP';
-    } else if(indexUp && !middleUp && !ringUp && !pinkyUp) {
-        // Only index up = FORWARD
-        return 'FORWARD';
-    } else if(indexUp && middleUp && !ringUp && !pinkyUp) {
-        // Index + middle = BACKWARD
-        return 'BACKWARD';
-    } else if(!indexUp && !middleUp && !ringUp && !pinkyUp) {
-        // Fist - check tilt
-        if(palmX < 0.4) return 'RIGHT';
-        if(palmX > 0.6) return 'LEFT';
-        return 'STOP';
-    } else if(thumbOut && !indexUp && !middleUp) {
-        // Thumb out only
-        if(thumbTip.x < wrist.x) return 'RIGHT';
-        else return 'LEFT';
-    }
-
-    return 'STOP';
-}
-
-function applyGestureControl(gesture) {
-    document.getElementById('gestureLabel').textContent = gesture;
-    document.getElementById('gestureCmd').textContent = gesture;
-
-    // Debounce - same gesture for 100ms before acting
-    if(gesture !== lastGesture) {
-        lastGesture = gesture;
-        gestureStartTime = Date.now();
-        return;
-    }
-
-    if(Date.now() - gestureStartTime < 100) return;
-
-    // Apply control
-    switch(gesture) {
-        case 'FORWARD':
-            send(0.15, 0);
-            break;
-        case 'BACKWARD':
-            send(-0.12, 0);
-            break;
-        case 'LEFT':
-            send(0, 0.5);
-            break;
-        case 'RIGHT':
-            send(0, -0.5);
-            break;
-        case 'STOP':
-        default:
-            stop();
-            break;
-    }
-}
 </script>
 </body>
 </html>
