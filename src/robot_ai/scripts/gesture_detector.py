@@ -55,6 +55,11 @@ class GestureDetector(Node):
         self.current_gesture = "none"
         self.hands = None
 
+        # Gesture stabilization - require consistent detection
+        self.gesture_history = []
+        self.gesture_history_size = 3  # Require 3 consecutive same gestures
+        self.stable_gesture = "none"
+
         # Initialize detector
         self._init_detector()
 
@@ -140,11 +145,25 @@ class GestureDetector(Node):
         else:
             gesture, hand_center, frame = self._detect_skin(frame)
 
-        self.current_gesture = gesture
+        # Gesture stabilization: require N consecutive same detections
+        self.gesture_history.append(gesture)
+        if len(self.gesture_history) > self.gesture_history_size:
+            self.gesture_history.pop(0)
+
+        # Check if all recent gestures are the same
+        if len(self.gesture_history) >= self.gesture_history_size:
+            if all(g == self.gesture_history[0] for g in self.gesture_history):
+                self.stable_gesture = self.gesture_history[0]
+            # Allow quick transition to "none" or "stop" for safety
+            elif gesture in ("none", "stop"):
+                self.stable_gesture = gesture
+
+        # Use stable gesture for control and publishing
+        self.current_gesture = self.stable_gesture
 
         # Publish gesture
         gesture_msg = String()
-        gesture_msg.data = gesture
+        gesture_msg.data = self.stable_gesture
         self.gesture_pub.publish(gesture_msg)
 
         # Publish hand position
@@ -301,48 +320,56 @@ class GestureDetector(Node):
         palm_width_vec = (index_mcp[0] - pinky_mcp[0], index_mcp[1] - pinky_mcp[1])
         palm_width = dist(index_mcp, pinky_mcp)
 
-        # Finger extension detection using angle-based method
-        # A finger is extended if it's relatively straight (tip far from MCP in finger direction)
+        # Finger extension detection - multi-criteria for accuracy
         def is_finger_extended(mcp, pip, dip, tip):
-            # Method 1: Distance ratio (works regardless of orientation)
+            # Criterion 1: Distance ratio
             dist_mcp_tip = dist(mcp, tip)
             dist_mcp_pip = dist(mcp, pip)
+            dist_pip_tip = dist(pip, tip)
 
-            # Method 2: Check if finger is straight (pip-dip-tip angle)
-            # Bent finger has small angle, extended has large angle (~180)
-            v1 = (pip[0] - dip[0], pip[1] - dip[1])
-            v2 = (tip[0] - dip[0], tip[1] - dip[1])
+            # Criterion 2: Finger straightness (angle at PIP joint)
+            # Calculate angle between MCP->PIP and PIP->TIP vectors
+            v1 = (pip[0] - mcp[0], pip[1] - mcp[1])
+            v2 = (tip[0] - pip[0], tip[1] - pip[1])
             dot_val = dot(v1, v2)
             mag1 = (v1[0]**2 + v1[1]**2) ** 0.5
             mag2 = (v2[0]**2 + v2[1]**2) ** 0.5
 
-            # Also check tip is farther from wrist than pip (finger pointing outward)
+            # Angle check: extended finger is relatively straight (>120 degrees)
+            is_straight = True
+            if mag1 > 0 and mag2 > 0:
+                cos_angle = dot_val / (mag1 * mag2)
+                cos_angle = max(-1, min(1, cos_angle))
+                # cos(120°) = -0.5, so cos_angle > -0.5 means angle < 120°
+                is_straight = cos_angle > -0.3  # ~107 degrees threshold
+
+            # Criterion 3: Tip farther from wrist than PIP
             tip_from_wrist = dist(wrist, tip)
             pip_from_wrist = dist(wrist, pip)
+            pointing_outward = tip_from_wrist > pip_from_wrist * 0.85
 
-            # Combine criteria:
-            # 1. Tip significantly farther from MCP than PIP
-            # 2. Tip farther from wrist than PIP (finger pointing away)
-            is_extended = (dist_mcp_tip > dist_mcp_pip * 1.4) and (tip_from_wrist > pip_from_wrist * 0.9)
+            # Criterion 4: Distance ratio check
+            ratio_ok = dist_mcp_tip > dist_mcp_pip * 1.3
 
-            return is_extended
+            # Extended if: straight AND pointing outward AND good ratio
+            return is_straight and pointing_outward and ratio_ok
 
-        # Simpler extension check for 3-point fingers (no DIP needed)
-        def is_finger_extended_simple(mcp, pip, tip):
-            dist_mcp_tip = dist(mcp, tip)
-            dist_mcp_pip = dist(mcp, pip)
-            tip_from_wrist = dist(wrist, tip)
-            pip_from_wrist = dist(wrist, pip)
-            return (dist_mcp_tip > dist_mcp_pip * 1.4) and (tip_from_wrist > pip_from_wrist * 0.85)
-
-        # Thumb extension: special case
+        # Thumb extension: uses different criteria
         def is_thumb_extended():
             dist_tip = dist(thumb_mcp, thumb_tip)
             dist_ip = dist(thumb_mcp, thumb_ip)
             # Thumb spread: distance from thumb tip to index mcp
             thumb_spread = dist(thumb_tip, index_mcp)
+            # Thumb to palm center distance
+            palm_center = ((index_mcp[0] + pinky_mcp[0])/2, (index_mcp[1] + pinky_mcp[1])/2)
+            thumb_to_palm = dist(thumb_tip, palm_center)
+
             # Extended if: tip far from mcp AND spread away from palm
-            return dist_tip > dist_ip * 1.2 and thumb_spread > palm_width * 0.4
+            ratio_ok = dist_tip > dist_ip * 1.15
+            spread_ok = thumb_spread > palm_width * 0.35
+            away_from_palm = thumb_to_palm > palm_size * 0.4
+
+            return ratio_ok and (spread_ok or away_from_palm)
 
         # Check each finger
         thumb_ext = is_thumb_extended()

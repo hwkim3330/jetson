@@ -1035,15 +1035,22 @@ function updateMapOverlays() {
             g.beginFill('#ff3b30');
             g.drawCircle(0, 0, 0.1);
             g.endFill();
-            // Cross
-            g.beginStroke('#ffffff');
-            g.setStrokeStyle(lineWidth * 0.5);
-            g.moveTo(-0.15, 0).lineTo(0.15, 0);
-            g.moveTo(0, -0.15).lineTo(0, 0.15);
+            // Direction arrow (pointing forward in goal direction)
+            g.beginFill('#ff3b30');
+            g.moveTo(0.35, 0);
+            g.lineTo(0.22, 0.1);
+            g.lineTo(0.22, -0.1);
+            g.closePath();
+            g.endFill();
+            // Arrow stem
+            g.beginStroke('#ff3b30');
+            g.setStrokeStyle(lineWidth * 0.8);
+            g.moveTo(0.1, 0).lineTo(0.25, 0);
             g.endStroke();
 
             goalMarkerShape.x = goalPose.x;
             goalMarkerShape.y = -goalPose.y;
+            goalMarkerShape.rotation = -goalPose.theta * 180 / Math.PI;
             goalMarkerShape.visible = true;
         } else {
             goalMarkerShape.visible = false;
