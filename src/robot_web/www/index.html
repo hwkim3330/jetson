@@ -1991,11 +1991,11 @@ function initHandTracking() {
 
 function drawHandOverlay() {
     const canvas = document.getElementById('handOverlay');
-    const cam = document.getElementById('cam1');
-    if(!canvas || !cam) return;
+    const camEl = document.getElementById('cam');
+    if(!canvas || !camEl) return;
 
-    canvas.width = cam.clientWidth;
-    canvas.height = cam.clientHeight;
+    canvas.width = camEl.clientWidth;
+    canvas.height = camEl.clientHeight;
     const ctx = canvas.getContext('2d');
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
