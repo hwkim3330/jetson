@@ -113,8 +113,8 @@
 
     <div class="content">
         <div class="page active" id="page-control">
-            <div class="camera-wrap">
-                <img id="cam1" src="/stream" alt="Camera">
+            <div class="camera-wrap" id="camWrap1">
+                <img id="cam" src="/stream" alt="Camera">
                 <canvas id="handOverlay"></canvas>
                 <div id="gestureLabel"></div>
                 <button class="hand-btn" id="bHand">🖐️</button>
@@ -190,8 +190,7 @@
         </div>
 
         <div class="page" id="page-ai">
-            <div class="camera-wrap">
-                <img id="cam2" src="/stream" alt="Camera">
+            <div class="camera-wrap" id="camWrap2">
                 <canvas id="boxCanvas"></canvas>
                 <button class="ai-btn" id="yoloB">YOLO</button>
             </div>
@@ -447,15 +446,14 @@ window.onresize = () => { initLids(); initBoxCanvas(); resizeMapViewer(); };
 setTimeout(() => { initLids(); initBoxCanvas(); }, 100);
 
 function setCam() {
-    // Camera src is set in HTML, this handles error recovery
-    const cams = [document.getElementById('cam1'), document.getElementById('cam2')];
-    cams.forEach(img => {
-        if (!img) return;
-        img.onerror = () => {
-            console.log(`Camera ${img.id} error, retrying...`);
-            setTimeout(() => { img.src = `/stream?t=${Date.now()}`; }, 2000);
+    // Single shared camera - error recovery
+    const cam = document.getElementById('cam');
+    if(cam) {
+        cam.onerror = () => {
+            console.log('Camera error, retrying...');
+            setTimeout(() => { cam.src = `/stream?t=${Date.now()}`; }, 2000);
         };
-    });
+    }
 }
 
 // Tabs
@@ -466,10 +464,12 @@ document.querySelectorAll('.tab').forEach(t => {
         t.classList.add('active');
         const page = t.dataset.page;
         document.getElementById('page-'+page).classList.add('active');
-        // Refresh camera when switching to AI tab (MJPEG may not load while hidden)
+        // Move shared camera to active page
+        const cam = document.getElementById('cam');
         if(page === 'ai') {
-            const cam2 = document.getElementById('cam2');
-            if(cam2 && cam2.naturalWidth === 0) cam2.src = `/stream?t=${Date.now()}`;
+            document.getElementById('camWrap2').prepend(cam);
+        } else if(page === 'control') {
+            document.getElementById('camWrap1').prepend(cam);
         }
         setTimeout(() => { initLids(); initJoys(); initBoxCanvas(); initMapViewer(); }, 50);
     };
