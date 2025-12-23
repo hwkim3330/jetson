@@ -191,7 +191,7 @@
 
         <div class="page" id="page-ai">
             <div class="camera-wrap">
-                <img id="cam2" src="/stream" alt="Camera">
+                <img id="cam2" src="" alt="Camera">
                 <canvas id="boxCanvas"></canvas>
                 <button class="ai-btn" id="yoloB">YOLO</button>
             </div>
@@ -464,7 +464,18 @@ document.querySelectorAll('.tab').forEach(t => {
         document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
         document.querySelectorAll('.page').forEach(x => x.classList.remove('active'));
         t.classList.add('active');
-        document.getElementById('page-'+t.dataset.page).classList.add('active');
+        const page = t.dataset.page;
+        document.getElementById('page-'+page).classList.add('active');
+        // Switch camera stream based on active tab
+        const cam1 = document.getElementById('cam1');
+        const cam2 = document.getElementById('cam2');
+        if(page === 'ai') {
+            cam1.src = '';
+            cam2.src = `/stream?t=${Date.now()}`;
+        } else {
+            cam2.src = '';
+            cam1.src = `/stream?t=${Date.now()}`;
+        }
         setTimeout(() => { initLids(); initJoys(); initBoxCanvas(); initMapViewer(); }, 50);
     };
 });
