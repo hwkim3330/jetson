@@ -724,22 +724,6 @@ function setup() {
 
     // Initialize hand tracking for MediaPipe overlay
     initHandTracking();
-
-    // Auto-start UI state: YOLO and Gesture are running by default
-    // Set buttons to ON state after short delay to allow subscriptions
-    setTimeout(() => {
-        // YOLO is auto-started, set button ON
-        yolo = true;
-        document.getElementById('yoloB').classList.add('on');
-        document.getElementById('yoloB').textContent = 'YOLO ON';
-        document.getElementById('logB').textContent = 'YOLO Active';
-
-        // Gesture is auto-started, set button ON and enable display
-        handMode = true;
-        document.getElementById('bHand').classList.add('on');
-        document.getElementById('handOverlay').style.display = 'block';
-        document.getElementById('gestureLabel').style.display = 'block';
-    }, 1000);
 }
 
 function setupMapClient() {

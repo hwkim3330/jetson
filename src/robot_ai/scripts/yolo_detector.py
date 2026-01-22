@@ -93,11 +93,13 @@ class YoloDetector(Node):
             self.get_logger().warn('Ultralytics not installed. Install with: pip3 install ultralytics')
             return
 
-        # Find model file (prefer YOLOv26 -> TensorRT -> YOLOv8)
+        # Find model file (prefer TensorRT engine for speed)
+        # YOLO26 TensorRT > YOLOv8 TensorRT > PyTorch fallback
         model_paths = [
             self.model_path,
-            '/home/nvidia/ros2_ws/src/robot_ai/models/yolo26n.pt',
+            '/home/nvidia/ros2_ws/src/robot_ai/models/yolo26n_fp16.engine',
             '/home/nvidia/ros2_ws/src/robot_ai/models/yolov8n_fp16.engine',
+            '/home/nvidia/ros2_ws/src/robot_ai/models/yolo26n.pt',
             '/home/nvidia/ros2_ws/src/robot_ai/models/yolov8n.pt',
             'yolov8n.pt'  # Will download if not found
         ]
