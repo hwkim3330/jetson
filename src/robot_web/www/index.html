@@ -212,7 +212,7 @@
 document.addEventListener('touchmove', e => e.preventDefault(), { passive: false });
 
 let ros, cmdVel, aiPub, modePub, goalPub, initPosePub, savePub, conn = false;
-let pts = [], yolo = true, boxes = [];  // Auto-started by robot
+let pts = [], yolo = false, boxes = [];
 const ML = 0.3, MA = 1.5, CAM_W = 640, CAM_H = 360;  // Max speed
 
 // TF transform from map to odom (for SLAM/Nav correction)
@@ -444,23 +444,6 @@ function resizeMapViewer() {
 }
 window.onresize = () => { initLids(); initBoxCanvas(); resizeMapViewer(); };
 setTimeout(() => { initLids(); initBoxCanvas(); }, 100);
-
-// Initialize AI button states (auto-started by robot)
-setTimeout(() => {
-    // YOLO button - default ON
-    const yoloBtn = document.getElementById('yoloB');
-    if(yoloBtn && yolo) {
-        yoloBtn.classList.add('on');
-        yoloBtn.textContent = 'YOLO ON';
-    }
-    // Hand button - default ON
-    const handBtn = document.getElementById('bHand');
-    if(handBtn && handMode) {
-        handBtn.classList.add('on');
-        document.getElementById('handOverlay').style.display = 'block';
-        document.getElementById('gestureLabel').style.display = 'block';
-    }
-}, 200);
 
 function setCam() {
     // Single shared camera - error recovery
@@ -1940,7 +1923,7 @@ setTimeout(initMapSlots, 500);
 // ============================================
 // Hand Tracking Overlay
 // ============================================
-let handMode = true;  // Auto-started by robot
+let handMode = false;
 let handLandmarks = [];
 let currentGesture = '';
 let gestureEnablePub = null;

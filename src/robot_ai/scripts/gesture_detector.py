@@ -39,7 +39,7 @@ class GestureDetector(Node):
         self.declare_parameter('detection_rate', 10.0)
         self.declare_parameter('min_detection_confidence', 0.4)
         self.declare_parameter('min_tracking_confidence', 0.3)
-        self.declare_parameter('enable_control', True)  # Auto-enabled by default
+        self.declare_parameter('enable_control', False)  # Enable via web button
         self.declare_parameter('linear_speed', 0.15)
         self.declare_parameter('angular_speed', 0.5)
 

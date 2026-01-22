@@ -131,66 +131,28 @@ class ModeController(Node):
         self.get_logger().info(f'Current mode: {self.current_mode}')
         self.publish_status(f'Mode: {self.current_mode}')
 
-        # Auto-start AI detectors after 3 seconds
-        self._auto_start_timer = self.create_timer(3.0, self._auto_start_ai)
-
-        # Watchdog: monitor AI processes every 10 seconds
+        # Watchdog: monitor AI processes every 10 seconds (only when running)
         self._watchdog_timer = self.create_timer(10.0, self._watchdog_check)
-        self._ai_auto_started = False
+        self._yolo_enabled = False
+        self._gesture_enabled = False
 
     def _watchdog_check(self):
-        """Check if AI processes are alive and restart if crashed"""
-        if not self._ai_auto_started:
-            return
-
+        """Check if enabled AI processes are alive and restart if crashed"""
         import subprocess
 
-        # Check YOLO
-        result = subprocess.run(['pgrep', '-f', 'yolo_detector'], capture_output=True)
-        if result.returncode != 0:
-            self.get_logger().warn('YOLO detector crashed - restarting...')
-            self.start_ai_process(['ros2', 'run', 'robot_ai', 'yolo_detector.py'])
+        # Check YOLO (only if enabled)
+        if self._yolo_enabled:
+            result = subprocess.run(['pgrep', '-f', 'yolo_detector'], capture_output=True)
+            if result.returncode != 0:
+                self.get_logger().warn('YOLO detector crashed - restarting...')
+                self.start_ai_process(['ros2', 'run', 'robot_ai', 'yolo_detector.py'])
 
-        # Check Gesture
-        result = subprocess.run(['pgrep', '-f', 'gesture_detector'], capture_output=True)
-        if result.returncode != 0:
-            self.get_logger().warn('Gesture detector crashed - restarting...')
-            self.start_ai_process(['ros2', 'run', 'robot_ai', 'gesture_detector.py'])
-
-    def _auto_start_ai(self):
-        """Auto-start YOLO and Gesture detectors on boot"""
-        # Cancel timer (one-shot behavior for ROS2 Humble compatibility)
-        if self._auto_start_timer:
-            self._auto_start_timer.cancel()
-            self._auto_start_timer = None
-
-        self.get_logger().info('Auto-starting AI detectors...')
-
-        # Start YOLO detector
-        self.start_ai_process(['ros2', 'run', 'robot_ai', 'yolo_detector.py'])
-        self.get_logger().info('YOLO detector auto-started')
-
-        # Start Gesture detector
-        self.start_ai_process(['ros2', 'run', 'robot_ai', 'gesture_detector.py'])
-        self.get_logger().info('Gesture detector auto-started')
-
-        self._ai_auto_started = True
-
-        # Enable gesture control after detectors initialize
-        self._gesture_enable_timer = self.create_timer(2.0, self._enable_gesture_control)
-
-    def _enable_gesture_control(self):
-        """Enable gesture control for robot movement"""
-        # One-shot: cancel timer
-        if self._gesture_enable_timer:
-            self._gesture_enable_timer.cancel()
-            self._gesture_enable_timer = None
-
-        msg = Bool()
-        msg.data = True
-        self.gesture_enable_pub.publish(msg)
-        self.get_logger().info('Gesture control enabled')
-        self.publish_status('AI: yolo+gesture (auto)')
+        # Check Gesture (only if enabled)
+        if self._gesture_enabled:
+            result = subprocess.run(['pgrep', '-f', 'gesture_detector'], capture_output=True)
+            if result.returncode != 0:
+                self.get_logger().warn('Gesture detector crashed - restarting...')
+                self.start_ai_process(['ros2', 'run', 'robot_ai', 'gesture_detector.py'])
 
     def publish_status(self, status):
         msg = String()
@@ -503,23 +465,26 @@ class ModeController(Node):
 
         if action == 'on':
             if ai_type == 'yolo':
-                # Check if already running
                 result = subprocess.run(['pgrep', '-f', 'yolo_detector'], capture_output=True)
                 if result.returncode != 0:
                     self.start_ai_process(['ros2', 'run', 'robot_ai', 'yolo_detector.py'])
                     self.get_logger().info('YOLO detector started')
+                self._yolo_enabled = True
             elif ai_type == 'gesture':
                 result = subprocess.run(['pgrep', '-f', 'gesture_detector'], capture_output=True)
                 if result.returncode != 0:
                     self.start_ai_process(['ros2', 'run', 'robot_ai', 'gesture_detector.py'])
                     self.get_logger().info('Gesture detector started')
+                self._gesture_enabled = True
         else:  # off
             if ai_type == 'yolo':
                 subprocess.run(['pkill', '-f', 'yolo_detector'], capture_output=True)
                 self.get_logger().info('YOLO detector stopped')
+                self._yolo_enabled = False
             elif ai_type == 'gesture':
                 subprocess.run(['pkill', '-f', 'gesture_detector'], capture_output=True)
                 self.get_logger().info('Gesture detector stopped')
+                self._gesture_enabled = False
 
     def example_callback(self, msg):
         """Handle example commands from web UI"""
