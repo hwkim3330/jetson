@@ -80,6 +80,7 @@ class ModeController(Node):
         self.patrol_cmd_pub = self.create_publisher(String, '/patrol/command', 10)
         self.parking_cmd_pub = self.create_publisher(String, '/parking/command', 10)
         self.lane_enable_pub = self.create_publisher(Bool, '/lane_follower/enable', 10)
+        self.gesture_enable_pub = self.create_publisher(Bool, '/gesture_enable', 10)
 
         # Subscribers
         self.mode_sub = self.create_subscription(
@@ -129,6 +130,42 @@ class ModeController(Node):
         self.get_logger().info('KETI Mode Controller started')
         self.get_logger().info(f'Current mode: {self.current_mode}')
         self.publish_status(f'Mode: {self.current_mode}')
+
+        # Auto-start AI detectors after 3 seconds
+        self._auto_start_timer = self.create_timer(3.0, self._auto_start_ai)
+
+    def _auto_start_ai(self):
+        """Auto-start YOLO and Gesture detectors on boot"""
+        # Cancel timer (one-shot behavior for ROS2 Humble compatibility)
+        if self._auto_start_timer:
+            self._auto_start_timer.cancel()
+            self._auto_start_timer = None
+
+        self.get_logger().info('Auto-starting AI detectors...')
+
+        # Start YOLO detector
+        self.start_ai_process(['ros2', 'run', 'robot_ai', 'yolo_detector.py'])
+        self.get_logger().info('YOLO detector auto-started')
+
+        # Start Gesture detector
+        self.start_ai_process(['ros2', 'run', 'robot_ai', 'gesture_detector.py'])
+        self.get_logger().info('Gesture detector auto-started')
+
+        # Enable gesture control after detectors initialize
+        self._gesture_enable_timer = self.create_timer(2.0, self._enable_gesture_control)
+
+    def _enable_gesture_control(self):
+        """Enable gesture control for robot movement"""
+        # One-shot: cancel timer
+        if self._gesture_enable_timer:
+            self._gesture_enable_timer.cancel()
+            self._gesture_enable_timer = None
+
+        msg = Bool()
+        msg.data = True
+        self.gesture_enable_pub.publish(msg)
+        self.get_logger().info('Gesture control enabled')
+        self.publish_status('AI: yolo+gesture (auto)')
 
     def publish_status(self, status):
         msg = String()
@@ -181,7 +218,7 @@ class ModeController(Node):
                 'ros2', 'run', 'robot_ai', 'patrol.py'
             ])
             # Send start command after node starts
-            self.create_timer(1.0, self.start_patrol, one_shot=True)
+            self._patrol_timer = self.create_timer(1.0, self._start_patrol_once)
 
         elif new_mode == 'follower':
             # Start person follower
@@ -198,7 +235,7 @@ class ModeController(Node):
                 'ros2', 'run', 'robot_ai', 'lane_follower.py'
             ])
             # Enable lane following
-            self.create_timer(1.0, self.enable_lane, one_shot=True)
+            self._lane_timer = self.create_timer(1.0, self._enable_lane_once)
 
         elif new_mode == 'parking':
             # Start auto parking
@@ -206,7 +243,7 @@ class ModeController(Node):
                 'ros2', 'run', 'robot_ai', 'auto_parking.py'
             ])
             # Send start command
-            self.create_timer(1.0, self.start_parking, one_shot=True)
+            self._parking_timer = self.create_timer(1.0, self._start_parking_once)
 
         elif new_mode == 'slam':
             # Start SLAM (cartographer)
@@ -229,7 +266,14 @@ class ModeController(Node):
             ])
             self.get_logger().info('SLAM started for auto explore')
             # Start auto explore after SLAM initializes
-            self.create_timer(2.0, self.start_auto_explore, one_shot=True)
+            self._explore_timer = self.create_timer(2.0, self._start_auto_explore_once)
+
+    def _start_auto_explore_once(self):
+        """One-shot wrapper for start_auto_explore"""
+        if hasattr(self, '_explore_timer') and self._explore_timer:
+            self._explore_timer.cancel()
+            self._explore_timer = None
+        self.start_auto_explore()
 
     def start_auto_explore(self):
         """Start auto explore script"""
@@ -589,6 +633,13 @@ class ModeController(Node):
             self.example_thread.join(timeout=1.0)
         self.example_thread = None
 
+    def _start_patrol_once(self):
+        """One-shot wrapper for start_patrol"""
+        if hasattr(self, '_patrol_timer') and self._patrol_timer:
+            self._patrol_timer.cancel()
+            self._patrol_timer = None
+        self.start_patrol()
+
     def start_patrol(self):
         """Send start command to patrol node"""
         msg = String()
@@ -596,12 +647,26 @@ class ModeController(Node):
         self.patrol_cmd_pub.publish(msg)
         self.get_logger().info('Patrol started')
 
+    def _start_parking_once(self):
+        """One-shot wrapper for start_parking"""
+        if hasattr(self, '_parking_timer') and self._parking_timer:
+            self._parking_timer.cancel()
+            self._parking_timer = None
+        self.start_parking()
+
     def start_parking(self):
         """Send start command to parking node"""
         msg = String()
         msg.data = 'start'
         self.parking_cmd_pub.publish(msg)
         self.get_logger().info('Parking started')
+
+    def _enable_lane_once(self):
+        """One-shot wrapper for enable_lane"""
+        if hasattr(self, '_lane_timer') and self._lane_timer:
+            self._lane_timer.cancel()
+            self._lane_timer = None
+        self.enable_lane()
 
     def enable_lane(self):
         """Enable lane following"""
