@@ -15,6 +15,7 @@ export LDS_MODEL=LDS-04
 export ROS_DOMAIN_ID=30
 export HOME=/home/nvidia
 export USER=nvidia
+export PYTHONPATH=/home/nvidia/.local/lib/python3.10/site-packages:$PYTHONPATH
 
 # Log file
 LOG_DIR=/home/nvidia/ros2_ws/logs

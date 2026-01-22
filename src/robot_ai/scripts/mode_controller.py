@@ -139,20 +139,22 @@ class ModeController(Node):
     def _watchdog_check(self):
         """Check if enabled AI processes are alive and restart if crashed"""
         import subprocess
+        scripts_dir = '/home/nvidia/ros2_ws/src/robot_ai/scripts'
+        setup_cmd = 'source /opt/ros/humble/setup.bash && source /home/nvidia/ros2_ws/install/setup.bash && export PYTHONPATH=/home/nvidia/.local/lib/python3.10/site-packages:$PYTHONPATH && export LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH'
 
         # Check YOLO (only if enabled)
         if self._yolo_enabled:
-            result = subprocess.run(['pgrep', '-f', 'yolo_detector'], capture_output=True)
+            result = subprocess.run(['pgrep', '-f', 'yolo_detector.py'], capture_output=True)
             if result.returncode != 0:
                 self.get_logger().warn('YOLO detector crashed - restarting...')
-                self.start_ai_process(['ros2', 'run', 'robot_ai', 'yolo_detector.py'])
+                self.start_ai_process(['bash', '-c', f'{setup_cmd} && python3 {scripts_dir}/yolo_detector.py'])
 
         # Check Gesture (only if enabled)
         if self._gesture_enabled:
-            result = subprocess.run(['pgrep', '-f', 'gesture_detector'], capture_output=True)
+            result = subprocess.run(['pgrep', '-f', 'gesture_detector.py'], capture_output=True)
             if result.returncode != 0:
                 self.get_logger().warn('Gesture detector crashed - restarting...')
-                self.start_ai_process(['ros2', 'run', 'robot_ai', 'gesture_detector.py'])
+                self.start_ai_process(['bash', '-c', f'{setup_cmd} && python3 {scripts_dir}/gesture_detector.py'])
 
     def publish_status(self, status):
         msg = String()
@@ -463,17 +465,21 @@ class ModeController(Node):
         ai_type = parts[0]  # yolo or gesture
         action = parts[1]   # on or off
 
+        # Use bash -c to source environment and run python
+        scripts_dir = '/home/nvidia/ros2_ws/src/robot_ai/scripts'
+        setup_cmd = 'source /opt/ros/humble/setup.bash && source /home/nvidia/ros2_ws/install/setup.bash && export PYTHONPATH=/home/nvidia/.local/lib/python3.10/site-packages:$PYTHONPATH && export LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH'
+
         if action == 'on':
             if ai_type == 'yolo':
                 result = subprocess.run(['pgrep', '-f', 'yolo_detector'], capture_output=True)
                 if result.returncode != 0:
-                    self.start_ai_process(['ros2', 'run', 'robot_ai', 'yolo_detector.py'])
+                    self.start_ai_process(['bash', '-c', f'{setup_cmd} && python3 {scripts_dir}/yolo_detector.py'])
                     self.get_logger().info('YOLO detector started')
                 self._yolo_enabled = True
             elif ai_type == 'gesture':
                 result = subprocess.run(['pgrep', '-f', 'gesture_detector'], capture_output=True)
                 if result.returncode != 0:
-                    self.start_ai_process(['ros2', 'run', 'robot_ai', 'gesture_detector.py'])
+                    self.start_ai_process(['bash', '-c', f'{setup_cmd} && python3 {scripts_dir}/gesture_detector.py'])
                     self.get_logger().info('Gesture detector started')
                 self._gesture_enabled = True
         else:  # off
@@ -680,16 +686,27 @@ class ModeController(Node):
             self.get_logger().error(f'Failed to start mode process: {e}')
 
     def start_ai_process(self, cmd):
-        """Start an AI subprocess"""
+        """Start an AI subprocess with logging"""
         try:
+            # Extract log name from command (handle both direct and bash -c calls)
+            cmd_str = ' '.join(cmd)
+            if 'yolo_detector' in cmd_str:
+                log_name = 'yolo_detector.log'
+            elif 'gesture_detector' in cmd_str:
+                log_name = 'gesture_detector.log'
+            else:
+                log_name = 'ai_process.log'
+
+            log_path = f'/tmp/{log_name}'
+            log_file = open(log_path, 'a')
             process = subprocess.Popen(
                 cmd,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stdout=log_file,
+                stderr=log_file,
                 preexec_fn=os.setsid
             )
             self.ai_processes.append(process)
-            self.get_logger().info(f'Started AI process: {" ".join(cmd)}')
+            self.get_logger().info(f'Started AI process (log: {log_path})')
         except Exception as e:
             self.get_logger().error(f'Failed to start AI process: {e}')
 

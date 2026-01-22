@@ -91,8 +91,11 @@ class YoloDetector(Node):
         try:
             from ultralytics import YOLO
             self.ultralytics_available = True
-        except ImportError:
-            self.get_logger().warn('Ultralytics not installed. Install with: pip3 install ultralytics')
+        except ImportError as e:
+            self.get_logger().warn(f'Ultralytics not installed: {e}. Install with: pip3 install ultralytics')
+            return
+        except Exception as e:
+            self.get_logger().error(f'Failed to import ultralytics: {e}')
             return
 
         # Find model file (prefer TensorRT engine for speed)
