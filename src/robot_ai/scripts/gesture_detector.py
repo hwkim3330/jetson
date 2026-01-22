@@ -52,6 +52,8 @@ class GestureDetector(Node):
 
         self.bridge = CvBridge()
         self.last_frame = None
+        self.last_frame_time = None
+        self.camera_warning_logged = False
         self.current_gesture = "none"
         self.hands = None
 
@@ -117,6 +119,7 @@ class GestureDetector(Node):
         """Handle incoming images"""
         try:
             self.last_frame = self.bridge.imgmsg_to_cv2(msg, 'bgr8')
+            self._update_frame_time()
         except Exception as e:
             pass
 
@@ -126,14 +129,31 @@ class GestureDetector(Node):
             np_arr = np.frombuffer(msg.data, np.uint8)
             self.last_frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
             if self.last_frame is not None:
-                self.get_logger().debug(f'Got frame: {self.last_frame.shape}')
+                self._update_frame_time()
         except Exception as e:
             self.get_logger().error(f'Decode error: {e}')
+
+    def _update_frame_time(self):
+        """Update frame timestamp and clear warning"""
+        self.last_frame_time = self.get_clock().now()
+        if self.camera_warning_logged:
+            self.get_logger().info('Camera connection restored')
+            self.camera_warning_logged = False
 
     def detect_callback(self):
         """Run gesture detection"""
         if self.last_frame is None:
+            if not self.camera_warning_logged:
+                self.get_logger().warn('No camera frames received yet', throttle_duration_sec=10.0)
             return
+
+        # Check for stale frames (camera disconnected)
+        if self.last_frame_time:
+            age = (self.get_clock().now() - self.last_frame_time).nanoseconds / 1e9
+            if age > 5.0 and not self.camera_warning_logged:
+                self.get_logger().warn(f'Camera timeout: no frames for {age:.1f}s')
+                self.camera_warning_logged = True
+                self.stop_robot()  # Safety: stop robot if camera lost
 
         frame = self.last_frame.copy()
         h, w = frame.shape[:2]
