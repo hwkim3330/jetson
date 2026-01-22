@@ -65,7 +65,7 @@ dpkg -l | grep tensorrt
 ```bash
 # 1. Clone repository
 cd ~
-git clone https://github.com/hwkim3330/jetson_robot.git ros2_ws
+git clone https://github.com/hwkim3330/jetson.git ros2_ws
 
 # 2. Install dependencies
 cd ~/ros2_ws
@@ -162,6 +162,20 @@ http://<ROBOT_IP>:8888
 | `A` | Turn Left |
 | `D` | Turn Right |
 | `Space` | Stop |
+
+### 4. Gesture Control (🖐️ 버튼)
+
+| Gesture | Action |
+|---------|--------|
+| ✊ 주먹 | Forward |
+| 🖐️ 손바닥 | Stop |
+| 👈 왼쪽 포인팅 | Turn Left |
+| 👉 오른쪽 포인팅 | Turn Right |
+| ✌️ V사인 | Fast Forward |
+
+### 5. AI Detection (YOLO 버튼)
+
+웹에서 YOLO 버튼 클릭 → TensorRT 가속 객체 인식 시작
 
 ---
 
