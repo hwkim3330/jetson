@@ -475,13 +475,14 @@ document.querySelectorAll('.tab').forEach(t => {
     };
 });
 
-// YOLO
+// YOLO - toggle individual AI detector
 document.getElementById('yoloB').onclick = function() {
     yolo = !yolo;
     this.classList.toggle('on', yolo);
     this.textContent = yolo ? 'YOLO ON' : 'YOLO';
-    if(aiPub) aiPub.publish(new ROSLIB.Message({data: yolo?'yolo':'off'}));
-    document.getElementById('logB').textContent = yolo ? 'Starting...' : 'Stopped';
+    // Send toggle command (yolo_on or yolo_off)
+    if(aiPub) aiPub.publish(new ROSLIB.Message({data: yolo ? 'yolo_on' : 'yolo_off'}));
+    document.getElementById('logB').textContent = yolo ? 'YOLO Active' : 'YOLO Stopped';
     if(!yolo) { boxes = []; drawBoxes(); }
 };
 
@@ -723,6 +724,22 @@ function setup() {
 
     // Initialize hand tracking for MediaPipe overlay
     initHandTracking();
+
+    // Auto-start UI state: YOLO and Gesture are running by default
+    // Set buttons to ON state after short delay to allow subscriptions
+    setTimeout(() => {
+        // YOLO is auto-started, set button ON
+        yolo = true;
+        document.getElementById('yoloB').classList.add('on');
+        document.getElementById('yoloB').textContent = 'YOLO ON';
+        document.getElementById('logB').textContent = 'YOLO Active';
+
+        // Gesture is auto-started, set button ON and enable display
+        handMode = true;
+        document.getElementById('bHand').classList.add('on');
+        document.getElementById('handOverlay').style.display = 'block';
+        document.getElementById('gestureLabel').style.display = 'block';
+    }, 1000);
 }
 
 function setupMapClient() {
@@ -1943,7 +1960,11 @@ document.getElementById('bHand').onclick = function() {
     document.getElementById('handOverlay').style.display = handMode ? 'block' : 'none';
     document.getElementById('gestureLabel').style.display = handMode ? 'block' : 'none';
 
-    // Publish enable/disable to ROS
+    // Send toggle command (gesture_on or gesture_off) to mode controller
+    if(aiPub) {
+        aiPub.publish(new ROSLIB.Message({data: handMode ? 'gesture_on' : 'gesture_off'}));
+    }
+    // Also publish enable/disable to gesture node for control mode
     if(gestureEnablePub) {
         gestureEnablePub.publish(new ROSLIB.Message({data: handMode}));
     }

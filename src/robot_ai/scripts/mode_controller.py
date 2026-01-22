@@ -130,10 +130,37 @@ class ModeController(Node):
         self.get_logger().info(f'Current mode: {self.current_mode}')
         self.publish_status(f'Mode: {self.current_mode}')
 
+        # Auto-start AI detectors on boot (one-shot timer)
+        self._auto_start_timer = self.create_timer(3.0, self._auto_start_ai)
+
     def publish_status(self, status):
         msg = String()
         msg.data = status
         self.status_pub.publish(msg)
+
+    def _auto_start_ai(self):
+        """Auto-start YOLO and Gesture detectors on boot"""
+        # Cancel the timer (one-shot behavior)
+        if hasattr(self, '_auto_start_timer') and self._auto_start_timer:
+            self._auto_start_timer.cancel()
+            self._auto_start_timer = None
+
+        self.get_logger().info('Auto-starting AI detectors...')
+
+        # Start YOLO detector
+        self.start_ai_process([
+            'ros2', 'run', 'robot_ai', 'yolo_detector.py'
+        ])
+        self.get_logger().info('YOLO detector auto-started')
+
+        # Start Gesture detector
+        self.start_ai_process([
+            'ros2', 'run', 'robot_ai', 'gesture_detector.py'
+        ])
+        self.get_logger().info('Gesture detector auto-started')
+
+        self.current_ai = 'yolo+gesture'
+        self.publish_status('AI: yolo+gesture (auto)')
 
     def odom_callback(self, msg):
         """Process odometry data"""
@@ -373,6 +400,11 @@ class ModeController(Node):
         """Handle AI mode change requests"""
         new_ai = msg.data.lower()
 
+        # Handle toggle commands (yolo_on, yolo_off, gesture_on, gesture_off)
+        if new_ai.endswith('_on') or new_ai.endswith('_off'):
+            self._handle_ai_toggle(new_ai)
+            return
+
         if new_ai == self.current_ai:
             return
 
@@ -411,6 +443,41 @@ class ModeController(Node):
             self.start_ai_process([
                 'ros2', 'run', 'robot_ai', 'multi_ai_engine.py'
             ])
+
+        elif new_ai == 'yolo+gesture':
+            self.start_ai_process([
+                'ros2', 'run', 'robot_ai', 'yolo_detector.py'
+            ])
+            self.start_ai_process([
+                'ros2', 'run', 'robot_ai', 'gesture_detector.py'
+            ])
+
+    def _handle_ai_toggle(self, command):
+        """Handle individual AI toggle commands"""
+        import subprocess
+        parts = command.rsplit('_', 1)
+        ai_type = parts[0]  # yolo or gesture
+        action = parts[1]   # on or off
+
+        if action == 'on':
+            if ai_type == 'yolo':
+                # Check if already running
+                result = subprocess.run(['pgrep', '-f', 'yolo_detector'], capture_output=True)
+                if result.returncode != 0:
+                    self.start_ai_process(['ros2', 'run', 'robot_ai', 'yolo_detector.py'])
+                    self.get_logger().info('YOLO detector started')
+            elif ai_type == 'gesture':
+                result = subprocess.run(['pgrep', '-f', 'gesture_detector'], capture_output=True)
+                if result.returncode != 0:
+                    self.start_ai_process(['ros2', 'run', 'robot_ai', 'gesture_detector.py'])
+                    self.get_logger().info('Gesture detector started')
+        else:  # off
+            if ai_type == 'yolo':
+                subprocess.run(['pkill', '-f', 'yolo_detector'], capture_output=True)
+                self.get_logger().info('YOLO detector stopped')
+            elif ai_type == 'gesture':
+                subprocess.run(['pkill', '-f', 'gesture_detector'], capture_output=True)
+                self.get_logger().info('Gesture detector stopped')
 
     def example_callback(self, msg):
         """Handle example commands from web UI"""

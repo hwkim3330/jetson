@@ -32,6 +32,8 @@ Thumbs.db
 *.trt
 # Keep TensorRT engines (small enough)
 !*_fp16.engine
+# Keep YOLO26 model
+!*yolo26*.pt
 
 # Map files (generated)
 maps/

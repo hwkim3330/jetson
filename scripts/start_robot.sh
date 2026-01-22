@@ -27,6 +27,8 @@ log() {
 
 cleanup() {
     log "Shutting down..."
+    pkill -f "yolo_detector" 2>/dev/null || true
+    pkill -f "gesture_detector" 2>/dev/null || true
     pkill -f "rosbridge" 2>/dev/null || true
     pkill -f "robot.launch.py" 2>/dev/null || true
     exit 0
@@ -39,6 +41,8 @@ log "Starting KETI Robot"
 log "================================================"
 
 # Kill any existing processes
+pkill -f "yolo_detector" 2>/dev/null || true
+pkill -f "gesture_detector" 2>/dev/null || true
 pkill -f "rosbridge" 2>/dev/null || true
 pkill -f "robot.launch.py" 2>/dev/null || true
 sleep 2
@@ -49,6 +53,7 @@ ros2 launch rosbridge_server rosbridge_websocket_launch.xml > /dev/null 2>&1 &
 sleep 3
 
 # Start robot bringup (includes camera_node, mode_controller)
+# mode_controller will auto-start YOLO and Gesture detectors
 log "[2/2] Starting robot_bringup..."
 ros2 launch robot_bringup robot.launch.py 2>&1 | tee -a $LOG_FILE &
 ROBOT_PID=$!
